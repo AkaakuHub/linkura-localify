@@ -284,6 +284,10 @@ namespace L4Camera {
     void reset_camera();
     void on_cam_rawinput_keyboard(int message, int key);
     void on_cam_rawinput_joystick(JoystickEvent event);
+    void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
+                              float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
+                              float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
+                              int buttons, int flags);
 	void initCameraSettings();
     void clearRenderSet();
     static void recursiveAddFaceMesh(UnityResolve::UnityType::Transform* transform,

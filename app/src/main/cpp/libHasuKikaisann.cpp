@@ -114,6 +114,32 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_joystickEvent(JNIEnv *e
 
 extern "C"
 JNIEXPORT void JNICALL
+Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput(JNIEnv *env, jclass clazz,
+                                                                                jfloat leftStickX,
+                                                                                jfloat leftStickY,
+                                                                                jfloat rightStickX,
+                                                                                jfloat rightStickY,
+                                                                                jfloat leftTrigger,
+                                                                                jfloat leftGrip,
+                                                                                jfloat rightTrigger,
+                                                                                jfloat rightGrip,
+                                                                                jfloat yaw,
+                                                                                jfloat pitch,
+                                                                                jfloat roll,
+                                                                                jfloat hmdPosX,
+                                                                                jfloat hmdPosY,
+                                                                                jfloat hmdPosZ,
+                                                                                jint buttons,
+                                                                                jint flags) {
+    (void)env;
+    (void)clazz;
+    L4Camera::on_cam_network_input(leftStickX, leftStickY, rightStickX, rightStickY,
+                                   leftTrigger, leftGrip, rightTrigger, rightGrip,
+                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
 Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_loadConfig(JNIEnv *env, jclass clazz,
                                                                    jstring config_json_str) {
     const auto configJsonStrChars = env->GetStringUTFChars(config_json_str, nullptr);

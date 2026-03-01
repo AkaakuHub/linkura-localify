@@ -6,6 +6,9 @@
 #include "../../platformDefine.hpp"
 #include "../Log.h"
 #include "../config/Config.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <mutex>
 
 #ifdef GKMS_WINDOWS
     #include <corecrt_math_defines.h>
@@ -542,6 +545,51 @@ namespace L4Camera {
 		}
 	} cameraMoveState;
 
+    struct NetworkCameraInputState {
+        float leftStickX = 0.0f;
+        float leftStickY = 0.0f;
+        float rightStickX = 0.0f;
+        float rightStickY = 0.0f;
+        float leftTrigger = 0.0f;
+        float leftGrip = 0.0f;
+        float rightTrigger = 0.0f;
+        float rightGrip = 0.0f;
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+        float roll = 0.0f;
+        float hmdPosX = 0.0f;
+        float hmdPosY = 0.0f;
+        float hmdPosZ = 0.0f;
+        float prevHmdPosX = 0.0f;
+        float prevHmdPosY = 0.0f;
+        float prevHmdPosZ = 0.0f;
+        float prevYaw = 0.0f;
+        float prevPitch = 0.0f;
+        float filteredYawDelta = 0.0f;
+        float filteredPitchDelta = 0.0f;
+        bool hasPrevHmdPose = false;
+        bool hasPrevHeadAngle = false;
+        uint32_t buttons = 0;
+        uint32_t prevButtons = 0;
+        uint32_t flags = 0;
+    } networkCameraInputState;
+    std::mutex networkCameraInputMutex;
+
+    float normalizeRadianDelta(float value) {
+        constexpr float twoPi = 2.0f * static_cast<float>(M_PI);
+        while (value > static_cast<float>(M_PI)) {
+            value -= twoPi;
+        }
+        while (value < -static_cast<float>(M_PI)) {
+            value += twoPi;
+        }
+        return value;
+    }
+
+    float clampAbs(float value, float maxAbs) {
+        return std::clamp(value, -maxAbs, maxAbs);
+    }
+
 
 	void cameraRawInputThread() {
 		using namespace BaseCamera;
@@ -549,7 +597,19 @@ namespace L4Camera {
 		std::thread([]() {
 			if (cameraMoveState.threadRunning) return;
 			cameraMoveState.threadRunning = true;
+            int moveSensitivityStickLatch = 0;
+            int rotationSensitivityStickLatch = 0;
 			while (true) {
+                NetworkCameraInputState networkInputSnapshot;
+                {
+                    std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+                    networkInputSnapshot = networkCameraInputState;
+                }
+                constexpr uint32_t buttonB = (1u << 1);
+                constexpr uint32_t buttonY = (1u << 3);
+                const bool isBPressed = (networkInputSnapshot.buttons & buttonB) != 0;
+                const bool isYPressed = (networkInputSnapshot.buttons & buttonY) != 0;
+
 				if (cameraMoveState.w) camera_forward(LinkuraLocal::Config::cameraMovementSensitivity);
 				if (cameraMoveState.s) camera_back(LinkuraLocal::Config::cameraMovementSensitivity);
 				if (cameraMoveState.a) camera_left(LinkuraLocal::Config::cameraMovementSensitivity);
@@ -593,6 +653,191 @@ namespace L4Camera {
 //                if (cameraMoveState.dpad_down) JDadDown();
                 if (cameraMoveState.dpad_left) JDadLeft();
                 if (cameraMoveState.dpad_right) JDadRight();
+
+                if (std::abs(networkInputSnapshot.leftStickX) > 0.01f) {
+                    camera_right(networkInputSnapshot.leftStickX * l_sensitivity *
+                                 LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                }
+                if (!isBPressed && std::abs(networkInputSnapshot.leftStickY) > 0.01f) {
+                    camera_forward(networkInputSnapshot.leftStickY * l_sensitivity *
+                                   LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                }
+
+                if (std::abs(networkInputSnapshot.rightStickX) > 0.01f) {
+                    JRThumbRight(networkInputSnapshot.rightStickX);
+                }
+                if (!isYPressed && std::abs(networkInputSnapshot.rightStickY) > 0.01f) {
+                    JRThumbDown(-networkInputSnapshot.rightStickY);
+                }
+
+                const float cameraYawInputRad = networkInputSnapshot.pitch;
+                const float cameraPitchInputRad = networkInputSnapshot.roll;
+                float yawDeltaRad = 0.0f;
+                float pitchDeltaRad = 0.0f;
+                if (networkInputSnapshot.hasPrevHeadAngle) {
+                    yawDeltaRad = normalizeRadianDelta(cameraYawInputRad - networkInputSnapshot.prevYaw);
+                    pitchDeltaRad = normalizeRadianDelta(cameraPitchInputRad - networkInputSnapshot.prevPitch);
+                }
+
+                yawDeltaRad = clampAbs(yawDeltaRad, 0.2f);
+                pitchDeltaRad = clampAbs(pitchDeltaRad, 0.2f);
+                constexpr float yprSmoothing = 0.2f;
+                constexpr float yprDeadzoneRad = 0.002f;
+                yawDeltaRad = networkInputSnapshot.filteredYawDelta + (yawDeltaRad - networkInputSnapshot.filteredYawDelta) * yprSmoothing;
+                pitchDeltaRad = networkInputSnapshot.filteredPitchDelta + (pitchDeltaRad - networkInputSnapshot.filteredPitchDelta) * yprSmoothing;
+                if (std::abs(yawDeltaRad) < yprDeadzoneRad) yawDeltaRad = 0.0f;
+                if (std::abs(pitchDeltaRad) < yprDeadzoneRad) pitchDeltaRad = 0.0f;
+
+                {
+                    std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+                    networkCameraInputState.prevYaw = cameraYawInputRad;
+                    networkCameraInputState.prevPitch = cameraPitchInputRad;
+                    networkCameraInputState.filteredYawDelta = yawDeltaRad;
+                    networkCameraInputState.filteredPitchDelta = pitchDeltaRad;
+                    networkCameraInputState.hasPrevHeadAngle = true;
+                }
+
+                constexpr float hmdRotationGain = 3.0f;
+                constexpr float radToStickScale = 35.0f;
+                const float hmdYawStick = std::clamp(-yawDeltaRad * radToStickScale * hmdRotationGain, -1.0f, 1.0f);
+                const float hmdPitchStick = std::clamp(-pitchDeltaRad * radToStickScale * hmdRotationGain, -1.0f, 1.0f);
+                if (std::abs(hmdYawStick) > 0.001f) {
+                    JRThumbRight(hmdYawStick);
+                }
+                if (std::abs(hmdPitchStick) > 0.001f) {
+                    JRThumbDown(hmdPitchStick);
+                }
+
+                const auto currentButtons = networkInputSnapshot.buttons;
+                const auto previousButtons = networkInputSnapshot.prevButtons;
+                const auto risingButtons = (~previousButtons) & currentButtons;
+                {
+                    std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+                    networkCameraInputState.prevButtons = currentButtons;
+                }
+
+                constexpr float sensitivityAdjustScale = 0.5f;
+                constexpr float sensitivityMin = 0.05f;
+                constexpr float sensitivityMax = 10.0f;
+                constexpr float sensitivityStickTriggerThreshold = 0.6f;
+                constexpr float sensitivityStickReleaseThreshold = 0.25f;
+                constexpr uint32_t buttonA = (1u << 0);
+                constexpr uint32_t buttonX = (1u << 2);
+                const bool isAPressed = (currentButtons & buttonA) != 0;
+                const bool isXPressed = (currentButtons & buttonX) != 0;
+
+                if (!isBPressed) {
+                    moveSensitivityStickLatch = 0;
+                } else {
+                    if (std::abs(networkInputSnapshot.leftStickY) <= sensitivityStickReleaseThreshold) {
+                        moveSensitivityStickLatch = 0;
+                    }
+                    int currentStickDirection = 0;
+                    if (networkInputSnapshot.leftStickY >= sensitivityStickTriggerThreshold) {
+                        currentStickDirection = 1;
+                    } else if (networkInputSnapshot.leftStickY <= -sensitivityStickTriggerThreshold) {
+                        currentStickDirection = -1;
+                    }
+                    if (currentStickDirection != 0 && moveSensitivityStickLatch != currentStickDirection) {
+                        LinkuraLocal::Config::cameraMovementSensitivity = std::clamp(
+                            LinkuraLocal::Config::cameraMovementSensitivity + (currentStickDirection * sensitivityAdjustScale),
+                            sensitivityMin,
+                            sensitivityMax
+                        );
+                        moveSensitivityStickLatch = currentStickDirection;
+                        if (showToast) {
+                            LinkuraLocal::Log::ShowToastFmt("Movement Sensitivity: %.2f", LinkuraLocal::Config::cameraMovementSensitivity);
+                        }
+                    }
+                }
+
+                if (!isYPressed) {
+                    rotationSensitivityStickLatch = 0;
+                } else {
+                    if (std::abs(networkInputSnapshot.rightStickY) <= sensitivityStickReleaseThreshold) {
+                        rotationSensitivityStickLatch = 0;
+                    }
+                    int currentStickDirection = 0;
+                    if (networkInputSnapshot.rightStickY >= sensitivityStickTriggerThreshold) {
+                        currentStickDirection = 1;
+                    } else if (networkInputSnapshot.rightStickY <= -sensitivityStickTriggerThreshold) {
+                        currentStickDirection = -1;
+                    }
+                    if (currentStickDirection != 0 && rotationSensitivityStickLatch != currentStickDirection) {
+                        LinkuraLocal::Config::cameraRotationSensitivity = std::clamp(
+                            LinkuraLocal::Config::cameraRotationSensitivity + (currentStickDirection * sensitivityAdjustScale),
+                            sensitivityMin,
+                            sensitivityMax
+                        );
+                        rotationSensitivityStickLatch = currentStickDirection;
+                        if (showToast) {
+                            LinkuraLocal::Log::ShowToastFmt("Rotation Sensitivity: %.2f", LinkuraLocal::Config::cameraRotationSensitivity);
+                        }
+                    }
+                }
+
+                if (isYPressed && (risingButtons & buttonA)) {
+                    LinkuraLocal::Config::cameraVerticalSensitivity = std::clamp(
+                        LinkuraLocal::Config::cameraVerticalSensitivity + sensitivityAdjustScale,
+                        sensitivityMin,
+                        sensitivityMax
+                    );
+                    if (showToast) {
+                        LinkuraLocal::Log::ShowToastFmt("Vertical Sensitivity: %.2f", LinkuraLocal::Config::cameraVerticalSensitivity);
+                    }
+                }
+                if (isBPressed && (risingButtons & buttonX)) {
+                    LinkuraLocal::Config::cameraVerticalSensitivity = std::clamp(
+                        LinkuraLocal::Config::cameraVerticalSensitivity - sensitivityAdjustScale,
+                        sensitivityMin,
+                        sensitivityMax
+                    );
+                    if (showToast) {
+                        LinkuraLocal::Log::ShowToastFmt("Vertical Sensitivity: %.2f", LinkuraLocal::Config::cameraVerticalSensitivity);
+                    }
+                }
+
+                if (isAPressed && !isYPressed) {
+                    camera_up(l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                }
+                if (isXPressed && !isBPressed) {
+                    camera_down(l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                }
+
+                if (risingButtons & (1u << 4)) {
+                    firstPersonPosOffset = {0, 0.064f, 0.000f};
+                    followPosOffset = {0, 0, 1.5};
+                    followLookAtOffset = {0, 0};
+                }
+                if (risingButtons & (1u << 5)) {
+                    reset_camera();
+                }
+
+                if (networkInputSnapshot.hasPrevHmdPose) {
+                    const float deltaHmdX = networkInputSnapshot.hmdPosX - networkInputSnapshot.prevHmdPosX;
+                    const float deltaHmdY = networkInputSnapshot.hmdPosY - networkInputSnapshot.prevHmdPosY;
+                    const float deltaHmdZ = networkInputSnapshot.hmdPosZ - networkInputSnapshot.prevHmdPosZ;
+                    constexpr float hmdPosGain = 20.0f;
+                    constexpr float hmdPosDeadzone = 0.00005f;
+
+                    if (std::abs(deltaHmdX) > hmdPosDeadzone) {
+                        camera_right(deltaHmdX * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                    }
+                    if (std::abs(deltaHmdY) > hmdPosDeadzone) {
+                        camera_up(deltaHmdY * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                    }
+                    if (std::abs(deltaHmdZ) > hmdPosDeadzone) {
+                        camera_forward(deltaHmdZ * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                    }
+                }
+                {
+                    std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+                    networkCameraInputState.prevHmdPosX = networkInputSnapshot.hmdPosX;
+                    networkCameraInputState.prevHmdPosY = networkInputSnapshot.hmdPosY;
+                    networkCameraInputState.prevHmdPosZ = networkInputSnapshot.hmdPosZ;
+                    networkCameraInputState.hasPrevHmdPose = true;
+                }
+
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			}
 			}).detach();
@@ -733,6 +978,50 @@ namespace L4Camera {
 //                "Motion event: action=%d, leftStickX=%.2f, leftStickY=%.2f, rightStickX=%.2f, rightStickY=%.2f, leftTrigger=%.2f, rightTrigger=%.2f, hatX=%.2f, hatY=%.2f",
 //                message, leftStickX, leftStickY, rightStickX, rightStickY, leftTrigger,
 //                rightTrigger, hatX, hatY);
+    }
+
+    void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
+                              float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
+                              float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
+                              int buttons, int flags) {
+        std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+        networkCameraInputState.leftStickX = std::clamp(leftStickX, -1.0f, 1.0f);
+        networkCameraInputState.leftStickY = std::clamp(leftStickY, -1.0f, 1.0f);
+        networkCameraInputState.rightStickX = std::clamp(rightStickX, -1.0f, 1.0f);
+        networkCameraInputState.rightStickY = std::clamp(rightStickY, -1.0f, 1.0f);
+        networkCameraInputState.leftTrigger = std::clamp(leftTrigger, 0.0f, 1.0f);
+        networkCameraInputState.leftGrip = std::clamp(leftGrip, 0.0f, 1.0f);
+        networkCameraInputState.rightTrigger = std::clamp(rightTrigger, 0.0f, 1.0f);
+        networkCameraInputState.rightGrip = std::clamp(rightGrip, 0.0f, 1.0f);
+        networkCameraInputState.yaw = yaw;
+        networkCameraInputState.pitch = pitch;
+        networkCameraInputState.roll = roll;
+        networkCameraInputState.hmdPosX = hmdPosX;
+        networkCameraInputState.hmdPosY = hmdPosY;
+        networkCameraInputState.hmdPosZ = hmdPosZ;
+        networkCameraInputState.buttons = static_cast<uint32_t>(buttons);
+        networkCameraInputState.flags = static_cast<uint32_t>(flags);
+
+        if (networkCameraInputState.leftStickX == 0.0f &&
+            networkCameraInputState.leftStickY == 0.0f &&
+            networkCameraInputState.rightStickX == 0.0f &&
+            networkCameraInputState.rightStickY == 0.0f &&
+            networkCameraInputState.leftTrigger == 0.0f &&
+            networkCameraInputState.leftGrip == 0.0f &&
+            networkCameraInputState.rightTrigger == 0.0f &&
+            networkCameraInputState.rightGrip == 0.0f &&
+            networkCameraInputState.yaw == 0.0f &&
+            networkCameraInputState.pitch == 0.0f &&
+            networkCameraInputState.roll == 0.0f &&
+            networkCameraInputState.hmdPosX == 0.0f &&
+            networkCameraInputState.hmdPosY == 0.0f &&
+            networkCameraInputState.hmdPosZ == 0.0f &&
+            networkCameraInputState.buttons == 0) {
+            networkCameraInputState.hasPrevHmdPose = false;
+            networkCameraInputState.hasPrevHeadAngle = false;
+            networkCameraInputState.filteredYawDelta = 0.0f;
+            networkCameraInputState.filteredPitchDelta = 0.0f;
+        }
     }
 
 	void initCameraSettings() {

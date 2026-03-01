@@ -50,6 +50,7 @@ import io.github.chocolzs.linkura.localify.ui.overlay.xposed.OverlayToolbarUI
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
+import io.github.chocolzs.linkura.localify.ipc.WindowsInputTcpClient
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
 val TAG = "LinkuraLocalify"
@@ -69,6 +70,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private var gameActivity: Activity? = null
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
+    private val windowsInputTcpClient: WindowsInputTcpClient by lazy { WindowsInputTcpClient.getInstance() }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
     
@@ -805,6 +807,15 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             // Additional failure diagnosis
             diagnosePotentialConnectionIssues(context)
         }
+
+        val tcpStartResult = windowsInputTcpClient.startClient()
+        if (tcpStartResult) {
+            Log.i(TAG, "Windows input TCP client started successfully")
+            LogExporter.addLogEntry(TAG, "I", "Windows input TCP client started successfully")
+        } else {
+            Log.w(TAG, "Windows input TCP client failed to start")
+            LogExporter.addLogEntry(TAG, "W", "Windows input TCP client failed to start")
+        }
         
         Log.i(TAG, "=== AIDL Client Setup Diagnosis Complete ===")
     }
@@ -1155,6 +1166,25 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             rightTrigger: Float,
             hatX: Float,
             hatY: Float
+        )
+        @JvmStatic
+        external fun applyWindowsCameraInput(
+            leftStickX: Float,
+            leftStickY: Float,
+            rightStickX: Float,
+            rightStickY: Float,
+            leftTrigger: Float,
+            leftGrip: Float,
+            rightTrigger: Float,
+            rightGrip: Float,
+            yaw: Float,
+            pitch: Float,
+            roll: Float,
+            hmdPosX: Float,
+            hmdPosY: Float,
+            hmdPosZ: Float,
+            buttons: Int,
+            flags: Int
         )
         @JvmStatic
         external fun loadConfig(configJsonStr: String)
