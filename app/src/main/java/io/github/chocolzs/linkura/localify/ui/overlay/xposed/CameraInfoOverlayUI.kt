@@ -45,6 +45,7 @@ class CameraInfoOverlayUI : BaseOverlay {
     private lateinit var fovText: TextView
     private lateinit var modeText: TextView
     private lateinit var sceneText: TextView
+    private lateinit var stereoText: TextView
 
     // Camera data
     private var cameraInfoState: CameraInfo? = null
@@ -332,6 +333,20 @@ class CameraInfoOverlayUI : BaseOverlay {
             }
         }
         contentContainer.addView(sceneText)
+
+        stereoText = TextView(activity).apply {
+            text = "Stereo: OFF"
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (1f * density).toInt()
+            }
+        }
+        contentContainer.addView(stereoText)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -420,6 +435,7 @@ class CameraInfoOverlayUI : BaseOverlay {
             fovText.text = "FOV: ${String.format("%.1f", info.fov)}"
             modeText.text = "Mode: ${getModeString(info.mode)}"
             sceneText.text = "Scene: ${getSceneString(info.sceneType)}"
+            stereoText.text = "Stereo: ON (SBS)"
         } else {
             // Invalid data state
             statusText.text = "No Camera Data"
@@ -435,6 +451,7 @@ class CameraInfoOverlayUI : BaseOverlay {
         fovText.visibility = View.GONE
         modeText.visibility = View.GONE
         sceneText.visibility = View.GONE
+        stereoText.visibility = View.GONE
     }
 
     private fun showDetailTexts() {
@@ -443,6 +460,7 @@ class CameraInfoOverlayUI : BaseOverlay {
         fovText.visibility = View.VISIBLE
         modeText.visibility = View.VISIBLE
         sceneText.visibility = View.VISIBLE
+        stereoText.visibility = View.VISIBLE
     }
 
     private fun handleStateTransition(cameraInfo: CameraInfo) {

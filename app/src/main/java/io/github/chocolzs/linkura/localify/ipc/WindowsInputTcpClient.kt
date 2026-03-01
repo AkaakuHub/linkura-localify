@@ -25,10 +25,12 @@ class WindowsInputTcpClient private constructor() {
         private const val CLIENT_TAG = "WindowsInputTcpClient"
         private const val HOST = "10.0.2.2"
         private const val PORT = 39090
-        private const val PACKET_SIZE = 80
+        private const val HEADER_SIZE = 8
+        private const val BODY_LENGTH_V1 = 72
+        private const val BODY_LENGTH_V2 = 76
         private const val MAGIC = 0x4C4D4554
-        private const val PROTOCOL_VERSION = 1
-        private const val BODY_LENGTH = 72
+        private const val PROTOCOL_VERSION_V1 = 1
+        private const val PROTOCOL_VERSION_V2 = 2
         private const val CONNECT_TIMEOUT_MS = 2000
         private const val SO_TIMEOUT_MS = 250
         private const val RECONNECT_INTERVAL_MS = 1000L
@@ -66,7 +68,8 @@ class WindowsInputTcpClient private constructor() {
         val hmdPosX: Float,
         val hmdPosY: Float,
         val hmdPosZ: Float,
-        val buttons: Int
+        val buttons: Int,
+        val ipdMeters: Float
     )
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -130,12 +133,12 @@ class WindowsInputTcpClient private constructor() {
 
     private fun readPackets(socket: Socket) {
         val input = BufferedInputStream(socket.getInputStream())
-        val buffer = ByteArray(PACKET_SIZE)
+        val headerBuffer = ByteArray(HEADER_SIZE)
 
         while (isRunning.get() && isConnected.get()) {
             try {
-                readExact(input, buffer, PACKET_SIZE)
-                val packet = parsePacket(buffer) ?: continue
+                readExact(input, headerBuffer, HEADER_SIZE)
+                val packet = parsePacket(input, headerBuffer) ?: continue
                 LinkuraHookMain.applyWindowsCameraInput(
                     packet.leftStickX,
                     packet.leftStickY,
@@ -152,7 +155,8 @@ class WindowsInputTcpClient private constructor() {
                     packet.hmdPosY,
                     packet.hmdPosZ,
                     packet.buttons,
-                    packet.flags
+                    packet.flags,
+                    packet.ipdMeters
                 )
                 lastPacketTimeMs = System.currentTimeMillis()
                 zeroInputApplied = false
@@ -185,23 +189,34 @@ class WindowsInputTcpClient private constructor() {
             0.0f,
             0.0f,
             0,
-            0
+            0,
+            0.064f
         )
         zeroInputApplied = true
     }
 
-    private fun parsePacket(packet: ByteArray): InputPacket? {
-        if (packet.size != PACKET_SIZE) {
+    private fun parsePacket(input: BufferedInputStream, header: ByteArray): InputPacket? {
+        if (header.size != HEADER_SIZE) {
             return null
         }
-        val bb = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN)
-        val magic = bb.int
-        val version = bb.get().toInt() and 0xFF
-        val flags = bb.get().toInt() and 0xFF
-        val length = bb.short.toInt() and 0xFFFF
-        if (magic != MAGIC || version != PROTOCOL_VERSION || length != BODY_LENGTH) {
+        val headerBuffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+        val magic = headerBuffer.int
+        val version = headerBuffer.get().toInt() and 0xFF
+        val flags = headerBuffer.get().toInt() and 0xFF
+        val length = headerBuffer.short.toInt() and 0xFFFF
+        if (magic != MAGIC) {
             return null
         }
+
+        val isV1 = version == PROTOCOL_VERSION_V1 && length == BODY_LENGTH_V1
+        val isV2 = version == PROTOCOL_VERSION_V2 && length == BODY_LENGTH_V2
+        if (!isV1 && !isV2) {
+            return null
+        }
+
+        val bodyBuffer = ByteArray(length)
+        readExact(input, bodyBuffer, length)
+        val bb = ByteBuffer.wrap(bodyBuffer).order(ByteOrder.LITTLE_ENDIAN)
 
         bb.int
         bb.long
@@ -220,6 +235,13 @@ class WindowsInputTcpClient private constructor() {
         val hmdPosY = bb.float
         val hmdPosZ = bb.float
         val buttons = bb.int
+        val ipdMeters = if (isV2 && bb.remaining() >= Float.SIZE_BYTES) {
+            bb.float
+        } else {
+            0.064f
+        }
+
+        val safeIpdMeters = ipdMeters.coerceIn(0.0f, 0.12f)
 
         return InputPacket(
             flags = flags,
@@ -237,11 +259,15 @@ class WindowsInputTcpClient private constructor() {
             hmdPosX = hmdPosX,
             hmdPosY = hmdPosY,
             hmdPosZ = hmdPosZ,
-            buttons = buttons
+            buttons = buttons,
+            ipdMeters = safeIpdMeters
         )
     }
 
     private fun readExact(input: BufferedInputStream, target: ByteArray, size: Int) {
+        if (size > target.size) {
+            throw IllegalArgumentException("read size exceeds target buffer")
+        }
         var offset = 0
         while (offset < size) {
             val read = input.read(target, offset, size - offset)

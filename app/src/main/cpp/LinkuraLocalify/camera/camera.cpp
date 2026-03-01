@@ -1024,6 +1024,14 @@ namespace L4Camera {
         }
     }
 
+    NetworkStereoConfig GetNetworkStereoConfig() {
+        std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+        NetworkStereoConfig config{};
+        config.enabled = true;
+        config.ipdMeters = 0.192f;
+        return config;
+    }
+
 	void initCameraSettings() {
 		reset_camera();
 		cameraRawInputThread();

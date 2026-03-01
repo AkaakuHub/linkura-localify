@@ -1184,7 +1184,8 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             hmdPosY: Float,
             hmdPosZ: Float,
             buttons: Int,
-            flags: Int
+            flags: Int,
+            ipdMeters: Float
         )
         @JvmStatic
         external fun loadConfig(configJsonStr: String)

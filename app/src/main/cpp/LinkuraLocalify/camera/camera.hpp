@@ -290,6 +290,13 @@ namespace L4Camera {
                               int buttons, int flags);
 	void initCameraSettings();
     void clearRenderSet();
+
+    struct NetworkStereoConfig {
+        bool enabled = false;
+        float ipdMeters = 0.064f;
+    };
+
+    NetworkStereoConfig GetNetworkStereoConfig();
     static void recursiveAddFaceMesh(UnityResolve::UnityType::Transform* transform,
                                      L4Camera::CharacterMeshManager<void*>& set) {
         auto childCount = transform->GetChildCount();
