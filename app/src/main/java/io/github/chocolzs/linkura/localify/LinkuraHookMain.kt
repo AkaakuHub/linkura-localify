@@ -51,8 +51,8 @@ import kotlinx.serialization.json.Json
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
-import io.github.chocolzs.linkura.localify.ipc.StereoVideoEncoder
 import io.github.chocolzs.linkura.localify.ipc.WindowsInputTcpClient
+import io.github.chocolzs.linkura.localify.ipc.WebRtcSessionManager
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
 val TAG = "LinkuraLocalify"
@@ -73,7 +73,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
     private val windowsInputTcpClient: WindowsInputTcpClient by lazy { WindowsInputTcpClient.getInstance() }
-    private val stereoVideoEncoder: StereoVideoEncoder by lazy { StereoVideoEncoder.Holder.instance }
+    private val webRtcSessionManager: WebRtcSessionManager by lazy { WebRtcSessionManager.getInstance() }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
     private val videoPipelineLock = Any()
@@ -743,38 +743,16 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 if (videoPipelineStarted) {
                     return
                 }
-                val encodeWidth = 1920
-                val encodeHeight = 1080
-                val started = stereoVideoEncoder.start(encodeWidth, encodeHeight)
-                if (!started) {
-                    Log.w(TAG, "Stereo video encoder failed to start: reason=$reason")
-                    LogExporter.addLogEntry(TAG, "W", "Stereo video encoder failed to start: reason=$reason")
+                val context = AndroidAppHelper.currentApplication()?.applicationContext
+                if (context == null) {
+                    Log.w(TAG, "WebRTC session start failed: no application context, reason=$reason")
+                    LogExporter.addLogEntry(TAG, "W", "WebRTC session start failed: no application context, reason=$reason")
                     return
                 }
-
-                val surface = stereoVideoEncoder.inputSurface
-                val actualWidth = stereoVideoEncoder.encodeWidth
-                val actualHeight = stereoVideoEncoder.encodeHeight
-                if (surface == null) {
-                    Log.w(TAG, "Stereo video encoder started but input surface is null")
-                    LogExporter.addLogEntry(TAG, "W", "Stereo video encoder input surface is null")
-                    stereoVideoEncoder.stop()
-                    videoPipelineStarted = false
-                    return
-                }
-
-                val nativeSurfaceResult = setVideoEncoderSurface(surface, actualWidth, actualHeight)
-                if (!nativeSurfaceResult) {
-                    Log.w(TAG, "Failed to bind video encoder surface to native bridge: reason=$reason")
-                    LogExporter.addLogEntry(TAG, "W", "Failed to bind video encoder surface to native bridge: reason=$reason")
-                    stereoVideoEncoder.stop()
-                    videoPipelineStarted = false
-                    return
-                }
-
+                webRtcSessionManager.start(context)
                 videoPipelineStarted = true
-                Log.i(TAG, "Windows video pipeline started: ${actualWidth}x${actualHeight}, reason=$reason")
-                LogExporter.addLogEntry(TAG, "I", "Windows video pipeline started: reason=$reason")
+                Log.i(TAG, "WebRTC session started: reason=$reason")
+                LogExporter.addLogEntry(TAG, "I", "WebRTC session started: reason=$reason")
                 return
             }
 
@@ -782,11 +760,10 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 return
             }
 
-            setVideoEncoderSurface(null, 0, 0)
-            stereoVideoEncoder.stop()
+            webRtcSessionManager.stop()
             videoPipelineStarted = false
-            Log.i(TAG, "Windows video pipeline stopped: reason=$reason")
-            LogExporter.addLogEntry(TAG, "I", "Windows video pipeline stopped: reason=$reason")
+            Log.i(TAG, "WebRTC session stopped: reason=$reason")
+            LogExporter.addLogEntry(TAG, "I", "WebRTC session stopped: reason=$reason")
         }
     }
 

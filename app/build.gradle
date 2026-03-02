@@ -216,4 +216,5 @@ dependencies {
 
     // Protobuf
     implementation(libs.protobuf.javalite)
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
 }
