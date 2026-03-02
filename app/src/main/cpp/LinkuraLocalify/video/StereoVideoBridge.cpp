@@ -327,7 +327,8 @@ namespace LinkuraLocal::StereoVideo {
             return;
         }
 
-        if (!g_captureFrameReady.exchange(false, std::memory_order_acq_rel)) {
+        const bool captureReady = g_captureFrameReady.exchange(false, std::memory_order_acq_rel);
+        if (!captureReady) {
             skippedNoFrame++;
             logPeriodic();
             return;
@@ -395,6 +396,7 @@ namespace LinkuraLocal::StereoVideo {
         if (eglMakeCurrent(display, g_state.eglSurface, g_state.eglSurface, context) != EGL_TRUE) {
             logError("eglMakeCurrent to encoder surface failed");
             skippedMakeCurrentFail++;
+            g_captureFrameReady.store(true, std::memory_order_release);
             restoreGlState();
             logPeriodic();
             return;
@@ -423,6 +425,7 @@ namespace LinkuraLocal::StereoVideo {
         const EGLBoolean restoreResult = eglMakeCurrent(display, drawSurface, readSurface, context);
         if (restoreResult != EGL_TRUE) {
             logError("eglMakeCurrent restore failed");
+            g_captureFrameReady.store(true, std::memory_order_release);
             return;
         }
 

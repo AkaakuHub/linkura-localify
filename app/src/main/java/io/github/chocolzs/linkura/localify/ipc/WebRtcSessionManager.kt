@@ -32,6 +32,10 @@ class WebRtcSessionManager private constructor() {
         private const val CAPTURE_HEIGHT = 1080
         private const val CAPTURE_FPS = 60
         private const val VIDEO_TRACK_ID = "bridge-video-track"
+        private const val VP8_MIN_BITRATE_KBPS = 6000
+        private const val VP8_START_BITRATE_KBPS = 14000
+        private const val VP8_MAX_BITRATE_KBPS = 28000
+        private const val VP8_MAX_FRAMERATE = 60
 
         @Volatile
         private var INSTANCE: WebRtcSessionManager? = null
@@ -211,6 +215,7 @@ class WebRtcSessionManager private constructor() {
         videoTrack = track
         val sender = activePeerConnection.addTrack(track)
         applyVideoCodecPreference(activePeerConnection)
+        applyVideoSenderParameters(sender)
         Log.i(TAG, "WebRTC video track started: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}@${CAPTURE_FPS}")
         Log.i(TAG, "WebRTC video sender created: id=${sender.id()}")
     }
@@ -256,16 +261,18 @@ class WebRtcSessionManager private constructor() {
         val activePeerConnection = peerConnection ?: return
         activePeerConnection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(description: SessionDescription) {
-                Log.i(TAG, "Offer SDP summary: ${summarizeSdp(description.description)}")
+                val tunedSdp = tuneVp8OfferSdp(description.description)
+                Log.i(TAG, "Offer SDP summary: ${summarizeSdp(tunedSdp)}")
+                val tunedDescription = SessionDescription(description.type, tunedSdp)
                 activePeerConnection.setLocalDescription(
                     LoggingSdpObserver("setLocalDescription(offer)"),
-                    description
+                    tunedDescription
                 )
                 signalingClient.send(
                     WebRtcSignalingMessage(
                         type = "offer",
-                        sdpType = description.type.canonicalForm(),
-                        sdp = description.description
+                        sdpType = tunedDescription.type.canonicalForm(),
+                        sdp = tunedDescription.description
                     )
                 )
             }
@@ -393,10 +400,90 @@ class WebRtcSessionManager private constructor() {
         val framesEncoded = outboundVideo.members["framesEncoded"] ?: "n/a"
         val framesSent = outboundVideo.members["framesSent"] ?: "n/a"
         val qpSum = outboundVideo.members["qpSum"] ?: "n/a"
+        val qualityLimitationReason = outboundVideo.members["qualityLimitationReason"] ?: "n/a"
+        val qualityLimitationDurations = outboundVideo.members["qualityLimitationDurations"] ?: "n/a"
+        val targetBitrate = outboundVideo.members["targetBitrate"] ?: "n/a"
+        val encoderImplementation = outboundVideo.members["encoderImplementation"] ?: "n/a"
         Log.i(
             TAG,
-            "Outbound video stats: bytesSent=$bytesSent packetsSent=$packetsSent framesEncoded=$framesEncoded framesSent=$framesSent qpSum=$qpSum"
+            "Outbound video stats: bytesSent=$bytesSent packetsSent=$packetsSent framesEncoded=$framesEncoded framesSent=$framesSent qpSum=$qpSum targetBitrate=$targetBitrate qualityReason=$qualityLimitationReason qualityDurations=$qualityLimitationDurations encoder=$encoderImplementation"
         )
+    }
+
+    private fun applyVideoSenderParameters(sender: org.webrtc.RtpSender) {
+        try {
+            val parameters = sender.parameters ?: return
+            val encodings = parameters.encodings
+            if (encodings == null || encodings.isEmpty()) {
+                Log.w(TAG, "Sender parameters skipped: encoding list is empty")
+                return
+            }
+            for (encoding in encodings) {
+                encoding.maxBitrateBps = VP8_MAX_BITRATE_KBPS * 1000
+                encoding.minBitrateBps = VP8_MIN_BITRATE_KBPS * 1000
+                encoding.maxFramerate = VP8_MAX_FRAMERATE
+            }
+            if (!sender.setParameters(parameters)) {
+                Log.w(TAG, "Failed to apply sender bitrate parameters")
+                return
+            }
+            Log.i(
+                TAG,
+                "Applied sender bitrate parameters: min=${VP8_MIN_BITRATE_KBPS}kbps start=${VP8_START_BITRATE_KBPS}kbps max=${VP8_MAX_BITRATE_KBPS}kbps maxFps=$VP8_MAX_FRAMERATE"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "applyVideoSenderParameters failed", e)
+        }
+    }
+
+    private fun tuneVp8OfferSdp(sdp: String): String {
+        val lines = sdp.split("\r\n", "\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toMutableList()
+        val vp8PayloadType = lines.firstOrNull { line ->
+            line.startsWith("a=rtpmap:") && line.contains(" VP8/90000", ignoreCase = true)
+        }?.substringAfter("a=rtpmap:")
+            ?.substringBefore(" ")
+            ?.trim()
+            ?: return sdp
+
+        val fmtpLine =
+            "a=fmtp:$vp8PayloadType x-google-min-bitrate=$VP8_MIN_BITRATE_KBPS;x-google-start-bitrate=$VP8_START_BITRATE_KBPS;x-google-max-bitrate=$VP8_MAX_BITRATE_KBPS"
+        val nackLine = "a=rtcp-fb:$vp8PayloadType nack"
+        val pliLine = "a=rtcp-fb:$vp8PayloadType nack pli"
+
+        var hasFmtp = false
+        var hasNack = false
+        var hasPli = false
+        for (index in lines.indices) {
+            val line = lines[index]
+            if (line.startsWith("a=fmtp:$vp8PayloadType")) {
+                lines[index] = fmtpLine
+                hasFmtp = true
+            } else if (line == nackLine) {
+                hasNack = true
+            } else if (line == pliLine) {
+                hasPli = true
+            }
+        }
+        if (!hasFmtp) {
+            val rtpmapIndex = lines.indexOfFirst { line ->
+                line.startsWith("a=rtpmap:$vp8PayloadType ")
+            }
+            if (rtpmapIndex >= 0) {
+                lines.add(rtpmapIndex + 1, fmtpLine)
+            } else {
+                lines.add(fmtpLine)
+            }
+        }
+        if (!hasNack) {
+            lines.add(nackLine)
+        }
+        if (!hasPli) {
+            lines.add(pliLine)
+        }
+        return lines.joinToString(separator = "\r\n", postfix = "\r\n")
     }
 
     private fun applyVideoCodecPreference(activePeerConnection: PeerConnection) {

@@ -479,22 +479,40 @@ namespace LinkuraLocal::HookCamera {
             }
         }
         const bool stereoEnabled = isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache);
-        const void* captureCamera = stereoEnabled
+        const bool mainCameraAlive = Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache);
+        const bool captureTriggerEnabled = stereoEnabled && mainCameraAlive;
+        const void* rightCaptureCamera = stereoEnabled
             ? reinterpret_cast<void*>(stereoRightCameraCache)
+            : nullptr;
+        const void* mainCaptureCamera = (stereoEnabled && mainCameraAlive)
+            ? reinterpret_cast<void*>(mainFreeCameraCache)
             : nullptr;
         static uint64_t endCameraRenderingCalls = 0;
         static uint64_t captureCameraMatchedCalls = 0;
+        static uint64_t captureRightMatchedCalls = 0;
+        static uint64_t captureMainMatchedCalls = 0;
         endCameraRenderingCalls++;
-        if (captureCamera != nullptr && camera == captureCamera) {
+        const bool matchedRightCamera = rightCaptureCamera != nullptr && camera == rightCaptureCamera;
+        const bool matchedMainCamera = mainCaptureCamera != nullptr && camera == mainCaptureCamera;
+        if (captureTriggerEnabled && (matchedRightCamera || matchedMainCamera)) {
             captureCameraMatchedCalls++;
+            if (matchedRightCamera) {
+                captureRightMatchedCalls++;
+            }
+            if (matchedMainCamera) {
+                captureMainMatchedCalls++;
+            }
             throttle([&]() {
                 LinkuraLocal::Log::InfoFmt(
-                    "EndCameraRendering stats: calls=%llu matched=%llu stereo=%d camera=%p capture=%p",
+                    "EndCameraRendering stats: calls=%llu matched=%llu rightMatched=%llu mainMatched=%llu stereo=%d camera=%p rightCapture=%p mainCapture=%p",
                     static_cast<unsigned long long>(endCameraRenderingCalls),
                     static_cast<unsigned long long>(captureCameraMatchedCalls),
+                    static_cast<unsigned long long>(captureRightMatchedCalls),
+                    static_cast<unsigned long long>(captureMainMatchedCalls),
                     stereoEnabled ? 1 : 0,
                     camera,
-                    captureCamera
+                    rightCaptureCamera,
+                    mainCaptureCamera
                 );
             }, std::chrono::milliseconds(2000));
             EndCameraRendering_Orig(ctx, camera, method);
@@ -502,6 +520,9 @@ namespace LinkuraLocal::HookCamera {
             return;
         }
         EndCameraRendering_Orig(ctx, camera, method);
+        if (captureTriggerEnabled) {
+            LinkuraLocal::StereoVideo::OnEndCameraRendering();
+        }
     }
 
     DEFINE_HOOK(EGLBoolean, Probe_eglSwapBuffers, (EGLDisplay display, EGLSurface surface)) {

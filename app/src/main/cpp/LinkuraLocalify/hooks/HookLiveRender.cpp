@@ -10,6 +10,11 @@ namespace LinkuraLocal::HookLiveRender {
     namespace Shareable {
         bool isPlaying = false;
     }
+
+    namespace {
+        constexpr int kMinStreamingFps = 60;
+        constexpr int kNoVSync = 0;
+    }
     /**
      * @brief apply graphic settings for camera,
      * but will crash for with live camera,
@@ -174,7 +179,26 @@ namespace LinkuraLocal::HookLiveRender {
      */
     DEFINE_HOOK(void, Unity_set_targetFrameRate, (int value)) {
         const auto configFps = Config::targetFrameRate;
-        return Unity_set_targetFrameRate_Orig(configFps == 0 ? value: configFps);
+        int requestedFps = configFps == 0 ? value : configFps;
+        if (requestedFps <= 0 || requestedFps < kMinStreamingFps) {
+            requestedFps = kMinStreamingFps;
+        }
+        Log::InfoFmt(
+            "Unity_set_targetFrameRate override: value=%d config=%d applied=%d",
+            value,
+            configFps,
+            requestedFps
+        );
+        return Unity_set_targetFrameRate_Orig(requestedFps);
+    }
+
+    DEFINE_HOOK(void, QualitySettings_set_vSyncCount, (int32_t value)) {
+        Log::InfoFmt(
+            "QualitySettings_set_vSyncCount override: value=%d applied=%d",
+            value,
+            kNoVSync
+        );
+        return QualitySettings_set_vSyncCount_Orig(kNoVSync);
     }
 
     DEFINE_HOOK(void*, FesConnectArchivePlayer_JumpTimeAsync, (void* self, void* timespan, void* method)) {
@@ -380,6 +404,7 @@ namespace LinkuraLocal::HookLiveRender {
 
         ADD_HOOK(Screen_SetResolution,Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Screen::SetResolution(System.Int32,System.Int32,UnityEngine.FullScreenMode,System.Int32)"));
         ADD_HOOK(Camera_set_targetTexture, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Camera::set_targetTexture(UnityEngine.RenderTexture)"));
+        ADD_HOOK(QualitySettings_set_vSyncCount, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.QualitySettings::set_vSyncCount(System.Int32)"));
 //        ADD_HOOK(QualitySettings_set_antiAliasing, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.QualitySettings::set_antiAliasing(System.Int32)"));
 
         ADD_HOOK(MediaPlaylist_LoadFromText, Il2cppUtils::GetMethodPointer("M3U8Parser.dll", "M3U8Parser",
