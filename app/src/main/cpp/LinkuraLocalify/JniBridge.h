@@ -16,3 +16,6 @@ void pauseCameraInfoLoopFromNative(long delayMillis);
 // Pause camera info loop for default 3 seconds
 // This is a convenience overload that uses the default delay
 void pauseCameraInfoLoopFromNative();
+
+// Toggle stereo video pipeline from native side.
+void setStereoVideoStreamingEnabledFromNative(bool enabled);

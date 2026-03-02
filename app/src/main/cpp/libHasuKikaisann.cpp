@@ -17,6 +17,7 @@ JavaVM* g_javaVM = nullptr;
 jclass g_linkuraHookMainClass = nullptr;
 jmethodID showToastMethodId = nullptr;
 jmethodID pauseCameraInfoLoopMethodId = nullptr;
+jmethodID setStereoVideoStreamingEnabledMethodId = nullptr;
 
 bool UnityResolveProgress::startInit = false;
 UnityResolveProgress::Progress UnityResolveProgress::assembliesProgress{};
@@ -440,6 +441,58 @@ void pauseCameraInfoLoopFromNative(long delayMillis) {
     }
     
     // Detach thread if we attached it
+    if (needDetach) {
+        g_javaVM->DetachCurrentThread();
+    }
+}
+
+void setStereoVideoStreamingEnabledFromNative(bool enabled) {
+    if (g_javaVM == nullptr || g_linkuraHookMainClass == nullptr) {
+        LinkuraLocal::Log::Error("setStereoVideoStreamingEnabledFromNative: JVM or class not initialized");
+        return;
+    }
+
+    JNIEnv* env = nullptr;
+    bool needDetach = false;
+    int getEnvStat = g_javaVM->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (getEnvStat == JNI_EDETACHED) {
+        if (g_javaVM->AttachCurrentThread(&env, nullptr) != 0) {
+            LinkuraLocal::Log::Error("setStereoVideoStreamingEnabledFromNative: Failed to attach thread");
+            return;
+        }
+        needDetach = true;
+    } else if (getEnvStat != JNI_OK) {
+        LinkuraLocal::Log::Error("setStereoVideoStreamingEnabledFromNative: Failed to get JNI environment");
+        return;
+    }
+
+    if (setStereoVideoStreamingEnabledMethodId == nullptr) {
+        setStereoVideoStreamingEnabledMethodId = env->GetStaticMethodID(
+            g_linkuraHookMainClass,
+            "setStereoVideoStreamingEnabledFromNative",
+            "(Z)V"
+        );
+        if (setStereoVideoStreamingEnabledMethodId == nullptr) {
+            LinkuraLocal::Log::Error("setStereoVideoStreamingEnabledFromNative: Method not found");
+            if (needDetach) {
+                g_javaVM->DetachCurrentThread();
+            }
+            return;
+        }
+    }
+
+    env->CallStaticVoidMethod(
+        g_linkuraHookMainClass,
+        setStereoVideoStreamingEnabledMethodId,
+        enabled ? JNI_TRUE : JNI_FALSE
+    );
+
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        LinkuraLocal::Log::Error("setStereoVideoStreamingEnabledFromNative: Java exception");
+    }
+
     if (needDetach) {
         g_javaVM->DetachCurrentThread();
     }

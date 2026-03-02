@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
@@ -75,6 +76,14 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private val stereoVideoEncoder: StereoVideoEncoder by lazy { StereoVideoEncoder.Holder.instance }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
+    private val videoPipelineLock = Any()
+    private var videoPipelineStarted = false
+    private val videoPipelineControlThread: HandlerThread by lazy {
+        HandlerThread("StereoVideoControl").apply { start() }
+    }
+    private val videoPipelineControlHandler: Handler by lazy {
+        Handler(videoPipelineControlThread.looper)
+    }
     private val jsonCodec = Json {
         encodeDefaults = true
         ignoreUnknownKeys = true
@@ -108,6 +117,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             Log.i(TAG, "AIDL client disconnected from service")
             LogExporter.addLogEntry(TAG, "I", "AIDL client disconnected from service")
             isCameraInfoOverlayEnabled = false
+            setStereoVideoStreamingEnabledAsync(false, "aidlDisconnected")
             
             // Additional disconnection diagnosis
             Log.w(TAG, "=== Disconnection Details ===")
@@ -464,6 +474,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         if (lpparam.packageName != targetPackageName) {
             return
         }
+        activeHookMainInstance = this
 
         XposedHelpers.findAndHookMethod(
             "android.app.Activity",
@@ -720,6 +731,65 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
     }
 
+    private fun setStereoVideoStreamingEnabledAsync(enabled: Boolean, reason: String) {
+        videoPipelineControlHandler.post {
+            setStereoVideoStreamingEnabledInternal(enabled, reason)
+        }
+    }
+
+    private fun setStereoVideoStreamingEnabledInternal(enabled: Boolean, reason: String) {
+        synchronized(videoPipelineLock) {
+            if (enabled) {
+                if (videoPipelineStarted) {
+                    return
+                }
+                val encodeWidth = 1920
+                val encodeHeight = 1080
+                val started = stereoVideoEncoder.start(encodeWidth, encodeHeight)
+                if (!started) {
+                    Log.w(TAG, "Stereo video encoder failed to start: reason=$reason")
+                    LogExporter.addLogEntry(TAG, "W", "Stereo video encoder failed to start: reason=$reason")
+                    return
+                }
+
+                val surface = stereoVideoEncoder.inputSurface
+                val actualWidth = stereoVideoEncoder.encodeWidth
+                val actualHeight = stereoVideoEncoder.encodeHeight
+                if (surface == null) {
+                    Log.w(TAG, "Stereo video encoder started but input surface is null")
+                    LogExporter.addLogEntry(TAG, "W", "Stereo video encoder input surface is null")
+                    stereoVideoEncoder.stop()
+                    videoPipelineStarted = false
+                    return
+                }
+
+                val nativeSurfaceResult = setVideoEncoderSurface(surface, actualWidth, actualHeight)
+                if (!nativeSurfaceResult) {
+                    Log.w(TAG, "Failed to bind video encoder surface to native bridge: reason=$reason")
+                    LogExporter.addLogEntry(TAG, "W", "Failed to bind video encoder surface to native bridge: reason=$reason")
+                    stereoVideoEncoder.stop()
+                    videoPipelineStarted = false
+                    return
+                }
+
+                videoPipelineStarted = true
+                Log.i(TAG, "Windows video pipeline started: ${actualWidth}x${actualHeight}, reason=$reason")
+                LogExporter.addLogEntry(TAG, "I", "Windows video pipeline started: reason=$reason")
+                return
+            }
+
+            if (!videoPipelineStarted) {
+                return
+            }
+
+            setVideoEncoderSurface(null, 0, 0)
+            stereoVideoEncoder.stop()
+            videoPipelineStarted = false
+            Log.i(TAG, "Windows video pipeline stopped: reason=$reason")
+            LogExporter.addLogEntry(TAG, "I", "Windows video pipeline stopped: reason=$reason")
+        }
+    }
+
     private fun setupAidlClient(context: Context) {
         Log.i(TAG, "=== AIDL Client Setup Diagnosis ===")
         LogExporter.addLogEntry(TAG, "I", "Starting AIDL client setup diagnosis")
@@ -825,31 +895,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             LogExporter.addLogEntry(TAG, "W", "Windows input TCP client failed to start")
         }
 
-        val encodeWidth = 1920
-        val encodeHeight = 1080
-        Log.i(TAG, "Video encoder request size: ${encodeWidth}x${encodeHeight}, vrMode=true")
-        val videoStartResult = stereoVideoEncoder.start(encodeWidth, encodeHeight)
-        if (videoStartResult) {
-            val surface = stereoVideoEncoder.inputSurface
-            val actualWidth = stereoVideoEncoder.encodeWidth
-            val actualHeight = stereoVideoEncoder.encodeHeight
-            if (surface == null) {
-                Log.w(TAG, "Stereo video encoder started but input surface is null")
-                LogExporter.addLogEntry(TAG, "W", "Stereo video encoder input surface is null")
-            } else {
-                val nativeSurfaceResult = setVideoEncoderSurface(surface, actualWidth, actualHeight)
-                if (nativeSurfaceResult) {
-                    Log.i(TAG, "Windows video pipeline started successfully (${actualWidth}x${actualHeight})")
-                    LogExporter.addLogEntry(TAG, "I", "Windows video pipeline started successfully")
-                } else {
-                    Log.w(TAG, "Failed to bind video encoder surface to native bridge")
-                    LogExporter.addLogEntry(TAG, "W", "Failed to bind video encoder surface to native bridge")
-                }
-            }
-        } else {
-            Log.w(TAG, "Windows video encoder failed to start")
-            LogExporter.addLogEntry(TAG, "W", "Windows video encoder failed to start")
-        }
+        setStereoVideoStreamingEnabledAsync(false, "init")
         
         Log.i(TAG, "=== AIDL Client Setup Diagnosis Complete ===")
     }
@@ -1176,6 +1222,9 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     }
 
     companion object {
+        @Volatile
+        private var activeHookMainInstance: LinkuraHookMain? = null
+
         // Camera info loop ignore flag - shared across instances
         @Volatile
         @JvmStatic
@@ -1223,6 +1272,15 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         )
         @JvmStatic
         external fun setVideoEncoderSurface(surface: android.view.Surface?, width: Int, height: Int): Boolean
+        @JvmStatic
+        fun setStereoVideoStreamingEnabledFromNative(enabled: Boolean) {
+            val instance = activeHookMainInstance
+            if (instance == null) {
+                Log.w(TAG, "setStereoVideoStreamingEnabledFromNative ignored: no active instance")
+                return
+            }
+            instance.setStereoVideoStreamingEnabledAsync(enabled, "nativeStereoRigSync")
+        }
         @JvmStatic
         external fun loadConfig(configJsonStr: String)
         

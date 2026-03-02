@@ -39,9 +39,19 @@ namespace LinkuraLocal::HookCamera {
     bool initialCameraRendered = false;
     UnityResolve::UnityType::Camera* stereoRightCameraCache = nullptr;
     UnityResolve::UnityType::Transform* stereoRightTransformCache = nullptr;
+    bool lastStereoRigActiveNotified = false;
 
     bool isStereoRequested() {
         return L4Camera::GetNetworkStereoConfig().enabled;
+    }
+
+    void notifyStereoRigState(bool active) {
+        if (lastStereoRigActiveNotified == active) {
+            return;
+        }
+        lastStereoRigActiveNotified = active;
+        setStereoVideoStreamingEnabledFromNative(active);
+        LinkuraLocal::Log::InfoFmt("Stereo rig state changed: active=%d", active ? 1 : 0);
     }
 
     void applyStereoRects(bool enableStereo) {
@@ -68,6 +78,7 @@ namespace LinkuraLocal::HookCamera {
         stereoRightCameraCache = nullptr;
         stereoRightTransformCache = nullptr;
         applyStereoRects(false);
+        notifyStereoRigState(false);
     }
 
     void ensureStereoRig() {
@@ -101,6 +112,7 @@ namespace LinkuraLocal::HookCamera {
             stereoRightCameraCache->SetFoV(L4Camera::baseCamera.fov);
             stereoRightCameraCache->SetDepth(mainFreeCameraCache->GetDepth() + 0.001f);
             applyStereoRects(true);
+            notifyStereoRigState(true);
         }
     }
 
