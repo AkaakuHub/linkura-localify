@@ -567,6 +567,7 @@ namespace L4Camera {
         float prevPitch = 0.0f;
         float filteredYawDelta = 0.0f;
         float filteredPitchDelta = 0.0f;
+        float ipdMeters = 0.064f;
         bool hasPrevHmdPose = false;
         bool hasPrevHeadAngle = false;
         uint32_t buttons = 0;
@@ -983,7 +984,7 @@ namespace L4Camera {
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
                               float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
-                              int buttons, int flags) {
+                              int buttons, int flags, float ipdMeters) {
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
         networkCameraInputState.leftStickX = std::clamp(leftStickX, -1.0f, 1.0f);
         networkCameraInputState.leftStickY = std::clamp(leftStickY, -1.0f, 1.0f);
@@ -999,6 +1000,7 @@ namespace L4Camera {
         networkCameraInputState.hmdPosX = hmdPosX;
         networkCameraInputState.hmdPosY = hmdPosY;
         networkCameraInputState.hmdPosZ = hmdPosZ;
+        networkCameraInputState.ipdMeters = std::clamp(ipdMeters, 0.0f, 0.12f);
         networkCameraInputState.buttons = static_cast<uint32_t>(buttons);
         networkCameraInputState.flags = static_cast<uint32_t>(flags);
 
@@ -1028,7 +1030,7 @@ namespace L4Camera {
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
         NetworkStereoConfig config{};
         config.enabled = true;
-        config.ipdMeters = 0.192f;
+        config.ipdMeters = networkCameraInputState.ipdMeters;
         return config;
     }
 

@@ -287,7 +287,7 @@ namespace L4Camera {
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
                               float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
-                              int buttons, int flags);
+                              int buttons, int flags, float ipdMeters);
 	void initCameraSettings();
     void clearRenderSet();
 

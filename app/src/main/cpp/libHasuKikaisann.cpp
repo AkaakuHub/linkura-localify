@@ -135,10 +135,9 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput
                                                                                 jfloat ipdMeters) {
     (void)env;
     (void)clazz;
-    (void)ipdMeters;
     L4Camera::on_cam_network_input(leftStickX, leftStickY, rightStickX, rightStickY,
                                    leftTrigger, leftGrip, rightTrigger, rightGrip,
-                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags);
+                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags, ipdMeters);
 }
 
 extern "C"
