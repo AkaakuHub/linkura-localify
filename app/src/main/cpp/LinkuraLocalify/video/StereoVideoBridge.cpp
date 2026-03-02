@@ -1,18 +1,20 @@
 #include "StereoVideoBridge.hpp"
 
-#include <android/native_window_jni.h>
 #include <android/log.h>
+#include <android/native_window_jni.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 
-#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
 
 namespace {
     constexpr const char* kLogTag = "StereoVideoBridge";
+    thread_local bool g_tlsInSwapHook = false;
+    std::atomic<bool> g_captureFrameReady{false};
 
     struct StereoVideoState {
         std::mutex mutex;
@@ -29,8 +31,6 @@ namespace {
         GLuint program = 0;
         GLuint vertexShader = 0;
         GLuint fragmentShader = 0;
-        GLuint vao = 0;
-        GLuint vbo = 0;
         GLuint captureTexture = 0;
         int captureWidth = 0;
         int captureHeight = 0;
@@ -67,12 +67,23 @@ namespace {
 
         static constexpr const char* kVertexSrc = R"(
             #version 300 es
-            layout(location = 0) in vec2 aPos;
-            layout(location = 1) in vec2 aTex;
             out vec2 vTex;
             void main() {
-                vTex = aTex;
-                gl_Position = vec4(aPos, 0.0, 1.0);
+                vec2 pos;
+                if (gl_VertexID == 0) {
+                    pos = vec2(-1.0, -1.0);
+                    vTex = vec2(0.0, 0.0);
+                } else if (gl_VertexID == 1) {
+                    pos = vec2(1.0, -1.0);
+                    vTex = vec2(1.0, 0.0);
+                } else if (gl_VertexID == 2) {
+                    pos = vec2(-1.0, 1.0);
+                    vTex = vec2(0.0, 1.0);
+                } else {
+                    pos = vec2(1.0, 1.0);
+                    vTex = vec2(1.0, 1.0);
+                }
+                gl_Position = vec4(pos, 0.0, 1.0);
             }
         )";
 
@@ -107,27 +118,6 @@ namespace {
             return false;
         }
 
-        constexpr std::array<float, 16> quad = {
-            -1.0f, -1.0f, 0.0f, 0.0f,
-             1.0f, -1.0f, 1.0f, 0.0f,
-            -1.0f,  1.0f, 0.0f, 1.0f,
-             1.0f,  1.0f, 1.0f, 1.0f,
-        };
-
-        glGenVertexArrays(1, &g_state.vao);
-        glGenBuffers(1, &g_state.vbo);
-        glBindVertexArray(g_state.vao);
-        glBindBuffer(GL_ARRAY_BUFFER, g_state.vbo);
-        glBufferData(GL_ARRAY_BUFFER, quad.size() * sizeof(float), quad.data(), GL_STATIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<const void*>(0));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<const void*>(2 * sizeof(float)));
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
-
         glGenTextures(1, &g_state.captureTexture);
         glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -143,14 +133,6 @@ namespace {
         if (g_state.captureTexture != 0) {
             glDeleteTextures(1, &g_state.captureTexture);
             g_state.captureTexture = 0;
-        }
-        if (g_state.vbo != 0) {
-            glDeleteBuffers(1, &g_state.vbo);
-            g_state.vbo = 0;
-        }
-        if (g_state.vao != 0) {
-            glDeleteVertexArrays(1, &g_state.vao);
-            g_state.vao = 0;
         }
         if (g_state.program != 0) {
             glDeleteProgram(g_state.program);
@@ -234,6 +216,12 @@ namespace {
 
         return true;
     }
+
+    bool isEncoderSurfaceLocked(EGLDisplay display, EGLSurface surface) {
+        return g_state.eglSurface != EGL_NO_SURFACE &&
+            g_state.eglDisplay == display &&
+            g_state.eglSurface == surface;
+    }
 }
 
 namespace LinkuraLocal::StereoVideo {
@@ -268,16 +256,22 @@ namespace LinkuraLocal::StereoVideo {
     }
 
     void OnEndCameraRendering() {
+        g_captureFrameReady.store(true, std::memory_order_release);
+    }
+
+    void OnEglSwapBuffers(EGLDisplay hookedDisplay, EGLSurface hookedSurface) {
         static uint64_t totalCalls = 0;
         static uint64_t submittedFrames = 0;
         static uint64_t skippedNoContext = 0;
         static uint64_t skippedNoTarget = 0;
+        static uint64_t skippedNoFrame = 0;
         static uint64_t skippedRecreateFail = 0;
         static uint64_t skippedNoResources = 0;
         static uint64_t skippedBadSurfaceSize = 0;
         static uint64_t skippedMakeCurrentFail = 0;
         static auto lastStatsLogAt = std::chrono::steady_clock::now();
         totalCalls++;
+
         auto logPeriodic = [&]() {
             const auto now = std::chrono::steady_clock::now();
             const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatsLogAt).count();
@@ -285,11 +279,12 @@ namespace LinkuraLocal::StereoVideo {
                 __android_log_print(
                     ANDROID_LOG_INFO,
                     kLogTag,
-                    "Bridge counters: calls=%llu submitted=%llu noContext=%llu noTarget=%llu recreateFail=%llu noResources=%llu badSurface=%llu makeCurrentFail=%llu",
+                    "Bridge counters: calls=%llu submitted=%llu noContext=%llu noTarget=%llu noFrame=%llu recreateFail=%llu noResources=%llu badSurface=%llu makeCurrentFail=%llu",
                     static_cast<unsigned long long>(totalCalls),
                     static_cast<unsigned long long>(submittedFrames),
                     static_cast<unsigned long long>(skippedNoContext),
                     static_cast<unsigned long long>(skippedNoTarget),
+                    static_cast<unsigned long long>(skippedNoFrame),
                     static_cast<unsigned long long>(skippedRecreateFail),
                     static_cast<unsigned long long>(skippedNoResources),
                     static_cast<unsigned long long>(skippedBadSurfaceSize),
@@ -310,10 +305,30 @@ namespace LinkuraLocal::StereoVideo {
             return;
         }
 
+        if (g_tlsInSwapHook) {
+            return;
+        }
+        g_tlsInSwapHook = true;
+        struct SwapHookScopeReset final {
+            ~SwapHookScopeReset() {
+                g_tlsInSwapHook = false;
+            }
+        } swapHookScopeReset;
+
         std::lock_guard<std::mutex> lock(g_state.mutex);
+
+        if (isEncoderSurfaceLocked(hookedDisplay, hookedSurface) || isEncoderSurfaceLocked(display, drawSurface)) {
+            return;
+        }
 
         if (g_state.window == nullptr || g_state.targetWidth <= 0 || g_state.targetHeight <= 0) {
             skippedNoTarget++;
+            logPeriodic();
+            return;
+        }
+
+        if (!g_captureFrameReady.exchange(false, std::memory_order_acq_rel)) {
+            skippedNoFrame++;
             logPeriodic();
             return;
         }
@@ -353,22 +368,26 @@ namespace LinkuraLocal::StereoVideo {
         }
 
         GLint prevProgram = 0;
-        GLint prevArrayBuffer = 0;
-        GLint prevVertexArray = 0;
         GLint prevActiveTex = 0;
         GLint prevTex2D = 0;
         GLint prevDrawFbo = 0;
         GLint prevReadFbo = 0;
         GLint prevViewport[4] = {0};
-
         glGetIntegerv(GL_CURRENT_PROGRAM, &prevProgram);
-        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuffer);
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVertexArray);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex2D);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDrawFbo);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
         glGetIntegerv(GL_VIEWPORT, prevViewport);
+
+        auto restoreGlState = [&]() {
+            glUseProgram(prevProgram);
+            glActiveTexture(static_cast<GLenum>(prevActiveTex));
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex2D));
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDrawFbo));
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevReadFbo));
+            glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+        };
 
         glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, drawWidth, drawHeight);
@@ -376,21 +395,18 @@ namespace LinkuraLocal::StereoVideo {
         if (eglMakeCurrent(display, g_state.eglSurface, g_state.eglSurface, context) != EGL_TRUE) {
             logError("eglMakeCurrent to encoder surface failed");
             skippedMakeCurrentFail++;
+            restoreGlState();
             logPeriodic();
             return;
         }
 
         glViewport(0, 0, g_state.targetWidth, g_state.targetHeight);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-
         glUseProgram(g_state.program);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
         const GLint texLoc = glGetUniformLocation(g_state.program, "uTex");
         glUniform1i(texLoc, 0);
-
-        glBindVertexArray(g_state.vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         if (g_state.presentationTimeProc != nullptr) {
@@ -402,28 +418,14 @@ namespace LinkuraLocal::StereoVideo {
 
         eglSwapBuffers(display, g_state.eglSurface);
         submittedFrames++;
-        if (submittedFrames % 300 == 0) {
-            __android_log_print(
-                ANDROID_LOG_INFO,
-                kLogTag,
-                "Bridge stats: submitted=%llu noContext=%llu noTarget=%llu recreateFail=%llu",
-                static_cast<unsigned long long>(submittedFrames),
-                static_cast<unsigned long long>(skippedNoContext),
-                static_cast<unsigned long long>(skippedNoTarget),
-                static_cast<unsigned long long>(skippedRecreateFail)
-            );
-        }
         logPeriodic();
 
-        eglMakeCurrent(display, drawSurface, readSurface, context);
+        const EGLBoolean restoreResult = eglMakeCurrent(display, drawSurface, readSurface, context);
+        if (restoreResult != EGL_TRUE) {
+            logError("eglMakeCurrent restore failed");
+            return;
+        }
 
-        glUseProgram(prevProgram);
-        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuffer));
-        glBindVertexArray(static_cast<GLuint>(prevVertexArray));
-        glActiveTexture(static_cast<GLenum>(prevActiveTex));
-        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prevTex2D));
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDrawFbo));
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevReadFbo));
-        glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+        restoreGlState();
     }
 }

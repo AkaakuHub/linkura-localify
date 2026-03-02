@@ -4,11 +4,14 @@
 #include "../video/StereoVideoBridge.hpp"
 #include "../Misc.hpp"
 #include "../../build/linkura_messages.pb.h"
+#include <EGL/egl.h>
+#include <dlfcn.h>
 #include "thread"
 #include "chrono"
 #include "vector"
 #include <algorithm>
 #include <re2/re2.h>
+#include "xdl.h"
 
 namespace LinkuraLocal::HookCamera {
     namespace Sharable {
@@ -466,11 +469,11 @@ namespace LinkuraLocal::HookCamera {
         const bool stereoEnabled = isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache);
         const void* captureCamera = stereoEnabled
             ? reinterpret_cast<void*>(stereoRightCameraCache)
-            : reinterpret_cast<void*>(mainFreeCameraCache);
+            : nullptr;
         static uint64_t endCameraRenderingCalls = 0;
         static uint64_t captureCameraMatchedCalls = 0;
         endCameraRenderingCalls++;
-        if (camera == captureCamera) {
+        if (captureCamera != nullptr && camera == captureCamera) {
             captureCameraMatchedCalls++;
             throttle([&]() {
                 LinkuraLocal::Log::InfoFmt(
@@ -488,6 +491,14 @@ namespace LinkuraLocal::HookCamera {
         }
         EndCameraRendering_Orig(ctx, camera, method);
     }
+
+    DEFINE_HOOK(EGLBoolean, Probe_eglSwapBuffers, (EGLDisplay display, EGLSurface surface)) {
+        if (eglGetCurrentContext() != EGL_NO_CONTEXT && eglGetCurrentDisplay() != EGL_NO_DISPLAY) {
+            LinkuraLocal::StereoVideo::OnEglSwapBuffers(display, surface);
+        }
+        return Probe_eglSwapBuffers_Orig(display, surface);
+    }
+
     enum CameraType {
         Invalid,
         FixedCamera,
@@ -1015,6 +1026,15 @@ namespace LinkuraLocal::HookCamera {
                                                                    "RenderPipeline", "EndCameraRendering"));
 
         ADD_HOOK(Unity_Renderer_set_enabled, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Renderer::set_enabled(System.Boolean)"));
+
+        void* eglHandle = xdl_open("libEGL.so", RTLD_NOW);
+        if (eglHandle != nullptr) {
+            auto eglSwapBuffersAddr = xdl_sym(eglHandle, "eglSwapBuffers", nullptr);
+            ADD_HOOK(Probe_eglSwapBuffers, eglSwapBuffersAddr);
+            xdl_close(eglHandle);
+        } else {
+            Log::ErrorFmt("EGL hook install failed: cannot open libEGL.so");
+        }
 #pragma endregion
     }
 }

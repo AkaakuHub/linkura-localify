@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
+import java.io.ByteArrayOutputStream
 class StereoVideoEncoder private constructor(
     private val videoClient: WindowsVideoTcpClient
 ) {
@@ -158,14 +159,23 @@ class StereoVideoEncoder private constructor(
                     outputBuffer.limit(info.offset + info.size)
                     val accessUnit = ByteArray(info.size)
                     outputBuffer.get(accessUnit)
+                    val normalizedAccessUnit = normalizeAccessUnitToAnnexB(accessUnit)
+                    if (normalizedAccessUnit == null) {
+                        Log.w(TAG, "Drop invalid AU: size=${info.size}, flags=${info.flags}")
+                        codec.releaseOutputBuffer(index, false)
+                        return
+                    }
 
                     videoClient.enqueueAccessUnit(
-                        payload = accessUnit,
+                        payload = normalizedAccessUnit,
                         codecFlags = info.flags
                     )
                     outputCount++
                     if (outputCount <= 5L || outputCount % 120L == 0L) {
-                        Log.i(TAG, "Encoder output: count=$outputCount size=${info.size} flags=${info.flags}")
+                        Log.i(
+                            TAG,
+                            "Encoder output: count=$outputCount rawSize=${info.size} normalizedSize=${normalizedAccessUnit.size} flags=${info.flags}"
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error handling output buffer", e)
@@ -255,6 +265,112 @@ class StereoVideoEncoder private constructor(
         System.arraycopy(startCode, 0, out, 0, startCode.size)
         System.arraycopy(nal, 0, out, startCode.size, nal.size)
         return out
+    }
+
+    private fun normalizeAccessUnitToAnnexB(accessUnit: ByteArray): ByteArray? {
+        if (accessUnit.isEmpty()) {
+            return null
+        }
+        val annexB = if (isAnnexB(accessUnit)) {
+            accessUnit
+        } else {
+            avccToAnnexB(accessUnit) ?: return null
+        }
+        return ensureFourByteStartCode(annexB)
+    }
+
+    private fun isAnnexB(data: ByteArray): Boolean {
+        if (data.size < 4) {
+            return false
+        }
+        if (data[0] == 0.toByte() && data[1] == 0.toByte() && data[2] == 1.toByte()) {
+            return true
+        }
+        return data[0] == 0.toByte() &&
+            data[1] == 0.toByte() &&
+            data[2] == 0.toByte() &&
+            data[3] == 1.toByte()
+    }
+
+    private fun avccToAnnexB(avcc: ByteArray): ByteArray? {
+        var offset = 0
+        val output = ByteArrayOutputStream(avcc.size + 64)
+        var nalCount = 0
+        while (offset + 4 <= avcc.size) {
+            val nalLength = ((avcc[offset].toInt() and 0xFF) shl 24) or
+                ((avcc[offset + 1].toInt() and 0xFF) shl 16) or
+                ((avcc[offset + 2].toInt() and 0xFF) shl 8) or
+                (avcc[offset + 3].toInt() and 0xFF)
+            offset += 4
+            if (nalLength <= 0 || offset + nalLength > avcc.size) {
+                return null
+            }
+            output.write(byteArrayOf(0x00, 0x00, 0x00, 0x01))
+            output.write(avcc, offset, nalLength)
+            offset += nalLength
+            nalCount++
+        }
+        if (offset != avcc.size || nalCount == 0) {
+            return null
+        }
+        return output.toByteArray()
+    }
+
+    private fun ensureFourByteStartCode(data: ByteArray): ByteArray {
+        val output = ByteArrayOutputStream(data.size + 64)
+        var offset = 0
+        var nalCount = 0
+        while (offset < data.size) {
+            var startCodeSize = 0
+            if (offset + 3 < data.size &&
+                data[offset] == 0.toByte() &&
+                data[offset + 1] == 0.toByte() &&
+                data[offset + 2] == 1.toByte()
+            ) {
+                startCodeSize = 3
+            } else if (offset + 4 < data.size &&
+                data[offset] == 0.toByte() &&
+                data[offset + 1] == 0.toByte() &&
+                data[offset + 2] == 0.toByte() &&
+                data[offset + 3] == 1.toByte()
+            ) {
+                startCodeSize = 4
+            }
+            if (startCodeSize == 0) {
+                offset++
+                continue
+            }
+
+            val nalStart = offset + startCodeSize
+            var nextStart = nalStart
+            while (nextStart < data.size) {
+                val hasThreeByte = nextStart + 2 < data.size &&
+                    data[nextStart] == 0.toByte() &&
+                    data[nextStart + 1] == 0.toByte() &&
+                    data[nextStart + 2] == 1.toByte()
+                val hasFourByte = nextStart + 3 < data.size &&
+                    data[nextStart] == 0.toByte() &&
+                    data[nextStart + 1] == 0.toByte() &&
+                    data[nextStart + 2] == 0.toByte() &&
+                    data[nextStart + 3] == 1.toByte()
+                if (hasThreeByte || hasFourByte) {
+                    break
+                }
+                nextStart++
+            }
+            if (nalStart >= nextStart) {
+                offset = nextStart
+                continue
+            }
+            output.write(byteArrayOf(0x00, 0x00, 0x00, 0x01))
+            output.write(data, nalStart, nextStart - nalStart)
+            nalCount++
+            offset = nextStart
+        }
+        if (nalCount == 0) {
+            return data
+        }
+        return output.toByteArray()
     }
 
     class Holder {

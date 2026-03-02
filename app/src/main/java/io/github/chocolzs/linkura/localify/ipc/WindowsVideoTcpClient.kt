@@ -123,7 +123,7 @@ class WindowsVideoTcpClient private constructor() {
                 System.arraycopy(config, 0, mergedPayload, 0, config.size)
                 System.arraycopy(payload, 0, mergedPayload, config.size, payload.size)
                 val mergedFrame = VideoFrame(
-                    seq = sequence.incrementAndGet(),
+                    seq = sequence.getAndIncrement(),
                     timestampMs = System.currentTimeMillis(),
                     flags = FLAG_KEY_FRAME or FLAG_CODEC_CONFIG,
                     payload = mergedPayload
@@ -145,7 +145,7 @@ class WindowsVideoTcpClient private constructor() {
 
         val flags = if (isKeyFrame) FLAG_KEY_FRAME else 0
         val frame = VideoFrame(
-            seq = sequence.incrementAndGet(),
+            seq = sequence.getAndIncrement(),
             timestampMs = System.currentTimeMillis(),
             flags = flags,
             payload = payload.copyOf()
