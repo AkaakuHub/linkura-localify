@@ -130,12 +130,25 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput
                                                                                 jfloat hmdPosY,
                                                                                 jfloat hmdPosZ,
                                                                                 jint buttons,
-                                                                                jint flags) {
+                                                                                jint flags,
+                                                                                jfloat ipdMeters) {
     (void)env;
     (void)clazz;
+    (void)ipdMeters;
     L4Camera::on_cam_network_input(leftStickX, leftStickY, rightStickX, rightStickY,
                                    leftTrigger, leftGrip, rightTrigger, rightGrip,
                                    yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags);
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_setVideoEncoderSurface(JNIEnv *env, jclass clazz,
+                                                                               jobject surface,
+                                                                               jint width,
+                                                                               jint height) {
+    (void)clazz;
+    const bool result = LinkuraLocal::StereoVideo::SetEncoderSurface(env, surface, width, height);
+    return result ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C"

@@ -76,6 +76,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         LinkuraLocalify/config/Config.cpp
         LinkuraLocalify/config/version_compatibility.cpp
         LinkuraLocalify/string_parser/StringParser.cpp
+        LinkuraLocalify/video/StereoVideoBridge.cpp
         # Hook modules
         LinkuraLocalify/hooks/HookDebug.cpp
         LinkuraLocalify/hooks/HookLiveRender.cpp
@@ -106,6 +107,8 @@ add_library(fmt STATIC ${FMT_DIR}/src/format.cc)
 target_link_libraries(${CMAKE_PROJECT_NAME}
     # List libraries link to the target library
     android
+    EGL
+    GLESv3
     log
     fmt)
 

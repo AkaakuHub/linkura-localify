@@ -1,6 +1,7 @@
 #include "../HookMain.h"
 #include "../config/Config.hpp"
 #include "../camera/camera.hpp"
+#include "../video/StereoVideoBridge.hpp"
 #include "../Misc.hpp"
 #include "../../build/linkura_messages.pb.h"
 #include "thread"
@@ -461,6 +462,29 @@ namespace LinkuraLocal::HookCamera {
                     }
                 }
             }
+        }
+        const bool stereoEnabled = isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache);
+        const void* captureCamera = stereoEnabled
+            ? reinterpret_cast<void*>(stereoRightCameraCache)
+            : reinterpret_cast<void*>(mainFreeCameraCache);
+        static uint64_t endCameraRenderingCalls = 0;
+        static uint64_t captureCameraMatchedCalls = 0;
+        endCameraRenderingCalls++;
+        if (camera == captureCamera) {
+            captureCameraMatchedCalls++;
+            throttle([&]() {
+                LinkuraLocal::Log::InfoFmt(
+                    "EndCameraRendering stats: calls=%llu matched=%llu stereo=%d camera=%p capture=%p",
+                    static_cast<unsigned long long>(endCameraRenderingCalls),
+                    static_cast<unsigned long long>(captureCameraMatchedCalls),
+                    stereoEnabled ? 1 : 0,
+                    camera,
+                    captureCamera
+                );
+            }, std::chrono::milliseconds(2000));
+            EndCameraRendering_Orig(ctx, camera, method);
+            LinkuraLocal::StereoVideo::OnEndCameraRendering();
+            return;
         }
         EndCameraRendering_Orig(ctx, camera, method);
     }

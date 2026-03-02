@@ -42,14 +42,15 @@ import io.github.chocolzs.linkura.localify.hookUtils.FilesChecker.getInstalledVe
 import io.github.chocolzs.linkura.localify.hookUtils.FilesChecker.getPluginVersion
 import io.github.chocolzs.linkura.localify.hookUtils.FilesChecker.localizationFilesDir
 import io.github.chocolzs.linkura.localify.mainUtils.LogExporter
-import io.github.chocolzs.linkura.localify.mainUtils.json
 import io.github.chocolzs.linkura.localify.models.NativeInitProgress
 import io.github.chocolzs.linkura.localify.models.ProgramConfig
 import io.github.chocolzs.linkura.localify.ui.game_attach.InitProgressUI
 import io.github.chocolzs.linkura.localify.ui.overlay.xposed.OverlayToolbarUI
+import kotlinx.serialization.json.Json
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
+import io.github.chocolzs.linkura.localify.ipc.StereoVideoEncoder
 import io.github.chocolzs.linkura.localify.ipc.WindowsInputTcpClient
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
@@ -71,8 +72,15 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
     private val windowsInputTcpClient: WindowsInputTcpClient by lazy { WindowsInputTcpClient.getInstance() }
+    private val stereoVideoEncoder: StereoVideoEncoder by lazy { StereoVideoEncoder.Holder.instance }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
+    private val jsonCodec = Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+        allowTrailingComma = true
+        allowComments = true
+    }
     
     // Loop control variables
     private val loopControlFlags = mutableMapOf<String, Boolean>()
@@ -816,6 +824,32 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             Log.w(TAG, "Windows input TCP client failed to start")
             LogExporter.addLogEntry(TAG, "W", "Windows input TCP client failed to start")
         }
+
+        val encodeWidth = 1920
+        val encodeHeight = 1080
+        Log.i(TAG, "Video encoder request size: ${encodeWidth}x${encodeHeight}, vrMode=true")
+        val videoStartResult = stereoVideoEncoder.start(encodeWidth, encodeHeight)
+        if (videoStartResult) {
+            val surface = stereoVideoEncoder.inputSurface
+            val actualWidth = stereoVideoEncoder.encodeWidth
+            val actualHeight = stereoVideoEncoder.encodeHeight
+            if (surface == null) {
+                Log.w(TAG, "Stereo video encoder started but input surface is null")
+                LogExporter.addLogEntry(TAG, "W", "Stereo video encoder input surface is null")
+            } else {
+                val nativeSurfaceResult = setVideoEncoderSurface(surface, actualWidth, actualHeight)
+                if (nativeSurfaceResult) {
+                    Log.i(TAG, "Windows video pipeline started successfully (${actualWidth}x${actualHeight})")
+                    LogExporter.addLogEntry(TAG, "I", "Windows video pipeline started successfully")
+                } else {
+                    Log.w(TAG, "Failed to bind video encoder surface to native bridge")
+                    LogExporter.addLogEntry(TAG, "W", "Failed to bind video encoder surface to native bridge")
+                }
+            }
+        } else {
+            Log.w(TAG, "Windows video encoder failed to start")
+            LogExporter.addLogEntry(TAG, "W", "Windows video encoder failed to start")
+        }
         
         Log.i(TAG, "=== AIDL Client Setup Diagnosis Complete ===")
     }
@@ -871,7 +905,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
             l4DataInited = true
             val initConfig = try {
-                json.decodeFromString<LinkuraConfig>(l4Data)
+                jsonCodec.decodeFromString<LinkuraConfig>(l4Data)
             }
             catch (e: Exception) {
                 null
@@ -882,7 +916,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 if (programData == null) {
                     ProgramConfig()
                 } else {
-                    json.decodeFromString<ProgramConfig>(programData)
+                    jsonCodec.decodeFromString<ProgramConfig>(programData)
                 }
             }
             catch (e: Exception) {
@@ -944,7 +978,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     }
 
     private fun processClientResourceData(clientResData: String, currentVersionName: String) {
-        val allClientRes = json.decodeFromString<Map<String, List<String>>>(clientResData)
+        val allClientRes = jsonCodec.decodeFromString<Map<String, List<String>>>(clientResData)
         val clientResList = allClientRes[currentVersionName]
         
         // Find the latest client version (highest version key in the map)
@@ -1187,6 +1221,8 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             flags: Int,
             ipdMeters: Float
         )
+        @JvmStatic
+        external fun setVideoEncoderSurface(surface: android.view.Surface?, width: Int, height: Int): Boolean
         @JvmStatic
         external fun loadConfig(configJsonStr: String)
         
