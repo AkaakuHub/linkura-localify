@@ -568,6 +568,7 @@ namespace L4Camera {
         float filteredYawDelta = 0.0f;
         float filteredPitchDelta = 0.0f;
         float ipdMeters = 0.064f;
+        float hmdVerticalFovDegrees = 90.0f;
         bool hasPrevHmdPose = false;
         bool hasPrevHeadAngle = false;
         uint32_t buttons = 0;
@@ -610,6 +611,10 @@ namespace L4Camera {
                 constexpr uint32_t buttonY = (1u << 3);
                 const bool isBPressed = (networkInputSnapshot.buttons & buttonB) != 0;
                 const bool isYPressed = (networkInputSnapshot.buttons & buttonY) != 0;
+                if (networkInputSnapshot.hmdVerticalFovDegrees >= 20.0f &&
+                    networkInputSnapshot.hmdVerticalFovDegrees <= 170.0f) {
+                    baseCamera.fov = networkInputSnapshot.hmdVerticalFovDegrees;
+                }
 
 				if (cameraMoveState.w) camera_forward(LinkuraLocal::Config::cameraMovementSensitivity);
 				if (cameraMoveState.s) camera_back(LinkuraLocal::Config::cameraMovementSensitivity);
@@ -984,7 +989,7 @@ namespace L4Camera {
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
                               float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
-                              int buttons, int flags, float ipdMeters) {
+                              int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees) {
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
         networkCameraInputState.leftStickX = std::clamp(leftStickX, -1.0f, 1.0f);
         networkCameraInputState.leftStickY = std::clamp(leftStickY, -1.0f, 1.0f);
@@ -1001,8 +1006,25 @@ namespace L4Camera {
         networkCameraInputState.hmdPosY = hmdPosY;
         networkCameraInputState.hmdPosZ = hmdPosZ;
         networkCameraInputState.ipdMeters = std::clamp(ipdMeters, 0.0f, 0.12f);
+        networkCameraInputState.hmdVerticalFovDegrees = std::clamp(hmdVerticalFovDegrees, 20.0f, 170.0f);
         networkCameraInputState.buttons = static_cast<uint32_t>(buttons);
         networkCameraInputState.flags = static_cast<uint32_t>(flags);
+        static auto lastTelemetryLogAt = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTelemetryLogAt).count() >= 1000) {
+            lastTelemetryLogAt = now;
+            LinkuraLocal::Log::InfoFmt(
+                "Network input telemetry: ipd=%.4f vFov=%.2f baseFov=%.2f yaw=%.3f pitch=%.3f roll=%.3f flags=%u buttons=%u",
+                networkCameraInputState.ipdMeters,
+                networkCameraInputState.hmdVerticalFovDegrees,
+                baseCamera.fov,
+                networkCameraInputState.yaw,
+                networkCameraInputState.pitch,
+                networkCameraInputState.roll,
+                networkCameraInputState.flags,
+                networkCameraInputState.buttons
+            );
+        }
 
         if (networkCameraInputState.leftStickX == 0.0f &&
             networkCameraInputState.leftStickY == 0.0f &&

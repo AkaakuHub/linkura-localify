@@ -1245,7 +1245,8 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             hmdPosZ: Float,
             buttons: Int,
             flags: Int,
-            ipdMeters: Float
+            ipdMeters: Float,
+            hmdVerticalFovDegrees: Float
         )
         @JvmStatic
         external fun setVideoEncoderSurface(surface: android.view.Surface?, width: Int, height: Int): Boolean

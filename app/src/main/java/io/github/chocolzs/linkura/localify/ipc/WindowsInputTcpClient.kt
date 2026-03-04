@@ -26,11 +26,9 @@ class WindowsInputTcpClient private constructor() {
         private const val HOST = "10.0.2.2"
         private const val PORT = 39090
         private const val HEADER_SIZE = 8
-        private const val BODY_LENGTH_V1 = 72
-        private const val BODY_LENGTH_V2 = 76
+        private const val BODY_LENGTH_V1 = 80
         private const val MAGIC = 0x4C4D4554
         private const val PROTOCOL_VERSION_V1 = 1
-        private const val PROTOCOL_VERSION_V2 = 2
         private const val CONNECT_TIMEOUT_MS = 2000
         private const val SO_TIMEOUT_MS = 250
         private const val RECONNECT_INTERVAL_MS = 1000L
@@ -51,6 +49,7 @@ class WindowsInputTcpClient private constructor() {
     private var clientJob: Job? = null
     private var lastPacketTimeMs: Long = 0L
     private var zeroInputApplied = true
+    private var lastTelemetryLogMs: Long = 0L
 
     private data class InputPacket(
         val flags: Int,
@@ -69,7 +68,8 @@ class WindowsInputTcpClient private constructor() {
         val hmdPosY: Float,
         val hmdPosZ: Float,
         val buttons: Int,
-        val ipdMeters: Float
+        val ipdMeters: Float,
+        val hmdVerticalFovDegrees: Float
     )
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -156,8 +156,17 @@ class WindowsInputTcpClient private constructor() {
                     packet.hmdPosZ,
                     packet.buttons,
                     packet.flags,
-                    packet.ipdMeters
+                    packet.ipdMeters,
+                    packet.hmdVerticalFovDegrees
                 )
+                val now = System.currentTimeMillis()
+                if (now - lastTelemetryLogMs >= 1000L) {
+                    lastTelemetryLogMs = now
+                    Log.i(
+                        CLIENT_TAG,
+                        "Input telemetry: ver=1 ipd=${"%.4f".format(packet.ipdMeters)} vFovDeg=${"%.2f".format(packet.hmdVerticalFovDegrees)} yaw=${"%.3f".format(packet.yaw)} pitch=${"%.3f".format(packet.pitch)} roll=${"%.3f".format(packet.roll)}"
+                    )
+                }
                 lastPacketTimeMs = System.currentTimeMillis()
                 zeroInputApplied = false
             } catch (_: SocketTimeoutException) {
@@ -190,7 +199,8 @@ class WindowsInputTcpClient private constructor() {
             0.0f,
             0,
             0,
-            0.064f
+            0.064f,
+            90.0f
         )
         zeroInputApplied = true
     }
@@ -209,8 +219,7 @@ class WindowsInputTcpClient private constructor() {
         }
 
         val isV1 = version == PROTOCOL_VERSION_V1 && length == BODY_LENGTH_V1
-        val isV2 = version == PROTOCOL_VERSION_V2 && length == BODY_LENGTH_V2
-        if (!isV1 && !isV2) {
+        if (!isV1) {
             return null
         }
 
@@ -235,13 +244,19 @@ class WindowsInputTcpClient private constructor() {
         val hmdPosY = bb.float
         val hmdPosZ = bb.float
         val buttons = bb.int
-        val ipdMeters = if (isV2 && bb.remaining() >= Float.SIZE_BYTES) {
+        val ipdMeters = if (bb.remaining() >= Float.SIZE_BYTES) {
             bb.float
         } else {
             0.064f
         }
+        val hmdVerticalFovDegrees = if (bb.remaining() >= Float.SIZE_BYTES) {
+            bb.float
+        } else {
+            90.0f
+        }
 
         val safeIpdMeters = ipdMeters.coerceIn(0.0f, 0.12f)
+        val safeHmdVerticalFovDegrees = hmdVerticalFovDegrees.coerceIn(20.0f, 170.0f)
 
         return InputPacket(
             flags = flags,
@@ -260,7 +275,8 @@ class WindowsInputTcpClient private constructor() {
             hmdPosY = hmdPosY,
             hmdPosZ = hmdPosZ,
             buttons = buttons,
-            ipdMeters = safeIpdMeters
+            ipdMeters = safeIpdMeters,
+            hmdVerticalFovDegrees = safeHmdVerticalFovDegrees
         )
     }
 
