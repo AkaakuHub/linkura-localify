@@ -10,6 +10,7 @@
 #include "chrono"
 #include "vector"
 #include <algorithm>
+#include <cmath>
 #include <re2/re2.h>
 #include "xdl.h"
 
@@ -157,6 +158,233 @@ namespace LinkuraLocal::HookCamera {
             freeCameraTransformCache = nullptr;
         }
         Log::DebugFmt("Unregister main camera");
+    }
+
+    void logStereoDisparity() {
+        if (!isStereoRequested()) {
+            return;
+        }
+        if (!Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache) || !Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
+            return;
+        }
+
+        const auto sampleWorldPoint = L4Camera::baseCamera.lookAt;
+        const auto leftScreen = mainFreeCameraCache->WorldToScreenPoint(sampleWorldPoint, UnityResolve::UnityType::Camera::Eye::Mono);
+        const auto rightScreen = stereoRightCameraCache->WorldToScreenPoint(sampleWorldPoint, UnityResolve::UnityType::Camera::Eye::Mono);
+        if (leftScreen.z <= 0.0f || rightScreen.z <= 0.0f) {
+            return;
+        }
+
+        const auto leftRect = mainFreeCameraCache->GetPixelRect();
+        const auto rightRect = stereoRightCameraCache->GetPixelRect();
+        if (leftRect.fWidth <= 1.0f || rightRect.fWidth <= 1.0f) {
+            return;
+        }
+
+        const float leftXInEye = (leftScreen.x - leftRect.fX) / leftRect.fWidth;
+        const float rightXInEye = (rightScreen.x - rightRect.fX) / rightRect.fWidth;
+        const float disparityNorm = leftXInEye - rightXInEye;
+        const float averageEyeWidthPx = (leftRect.fWidth + rightRect.fWidth) * 0.5f;
+        const float disparityPx = disparityNorm * averageEyeWidthPx;
+
+        throttle([&]() {
+            LinkuraLocal::Log::InfoFmt(
+                "Stereo disparity telemetry: sampleWorld=(%.3f,%.3f,%.3f) leftX=%.4f rightX=%.4f disparityNorm=%.5f disparityPx=%.2f",
+                sampleWorldPoint.x,
+                sampleWorldPoint.y,
+                sampleWorldPoint.z,
+                leftXInEye,
+                rightXInEye,
+                disparityNorm,
+                disparityPx
+            );
+        }, std::chrono::milliseconds(1000));
+    }
+
+    bool buildOffAxisProjectionMatrix(
+        float nearClip,
+        float farClip,
+        float angleLeft,
+        float angleRight,
+        float angleUp,
+        float angleDown,
+        UnityResolve::UnityType::Matrix4x4& outMatrix
+    ) {
+        if (
+            !std::isfinite(nearClip)
+            || !std::isfinite(farClip)
+            || !std::isfinite(angleLeft)
+            || !std::isfinite(angleRight)
+            || !std::isfinite(angleUp)
+            || !std::isfinite(angleDown)
+        ) {
+            return false;
+        }
+        if (nearClip <= 0.0001f || farClip <= nearClip) {
+            return false;
+        }
+
+        const float left = std::tan(angleLeft) * nearClip;
+        const float right = std::tan(angleRight) * nearClip;
+        const float top = std::tan(angleUp) * nearClip;
+        const float bottom = std::tan(angleDown) * nearClip;
+        if (left >= right || bottom >= top) {
+            return false;
+        }
+
+        const float width = right - left;
+        const float height = bottom - top;
+        const float depth = farClip - nearClip;
+        if (width <= 0.000001f || std::abs(height) <= 0.000001f || depth <= 0.000001f) {
+            return false;
+        }
+
+        auto setElement = [&](int row, int col, float value) {
+            // Unity Matrix4x4 is column-major in memory: row + (column * 4)
+            outMatrix.m[col][row] = value;
+        };
+        for (int row = 0; row < 4; row++) {
+            for (int col = 0; col < 4; col++) {
+                setElement(row, col, 0.0f);
+            }
+        }
+
+        // OpenXR reference (xr_linear.h): m00,m02,m11,m12,m22,m23,m32.
+        float m00 = (2.0f * nearClip) / width;
+        float m02 = (right + left) / width;
+        float m11 = (2.0f * nearClip) / height;
+        float m12 = (top + bottom) / height;
+
+        // Unity camera projection expects opposite Y sign from raw OpenXR matrix in this path.
+        m11 = -m11;
+        m12 = -m12;
+
+        setElement(0, 0, m00);
+        setElement(0, 2, m02);
+        setElement(1, 1, m11);
+        setElement(1, 2, m12);
+        setElement(2, 2, -(farClip + nearClip) / depth);
+        setElement(2, 3, -(2.0f * farClip * nearClip) / depth);
+        setElement(3, 2, -1.0f);
+        return true;
+    }
+
+    float getMatrixElement(const UnityResolve::UnityType::Matrix4x4& matrix, int row, int col) {
+        return matrix.m[col][row];
+    }
+
+    void setMatrixElement(UnityResolve::UnityType::Matrix4x4& matrix, int row, int col, float value) {
+        matrix.m[col][row] = value;
+    }
+
+    UnityResolve::UnityType::Matrix4x4 multiplyMatrix4x4(
+        const UnityResolve::UnityType::Matrix4x4& left,
+        const UnityResolve::UnityType::Matrix4x4& right
+    ) {
+        UnityResolve::UnityType::Matrix4x4 result{};
+        for (int row = 0; row < 4; row++) {
+            for (int col = 0; col < 4; col++) {
+                float sum = 0.0f;
+                for (int k = 0; k < 4; k++) {
+                    sum += getMatrixElement(left, row, k) * getMatrixElement(right, k, col);
+                }
+                setMatrixElement(result, row, col, sum);
+            }
+        }
+        return result;
+    }
+
+    void applyStereoProjectionMatrices() {
+        if (!isStereoRequested()) {
+            return;
+        }
+        if (
+            !Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)
+            || !Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)
+        ) {
+            return;
+        }
+
+        static auto Camera_klass = Il2cppUtils::GetClass("UnityEngine.CoreModule.dll", "UnityEngine", "Camera");
+        static auto set_projectionMatrix = Camera_klass->Get<UnityResolve::Method>("set_projectionMatrix", { "*" });
+        static auto get_nearClipPlane = Camera_klass->Get<UnityResolve::Method>("get_nearClipPlane");
+        static auto get_farClipPlane = Camera_klass->Get<UnityResolve::Method>("get_farClipPlane");
+        static auto get_worldToCameraMatrix = Camera_klass->Get<UnityResolve::Method>("get_worldToCameraMatrix");
+        static auto set_cullingMatrix = Camera_klass->Get<UnityResolve::Method>("set_cullingMatrix", { "*" });
+        if (!set_projectionMatrix || !get_nearClipPlane || !get_farClipPlane) {
+            return;
+        }
+
+        const auto stereoConfig = L4Camera::GetNetworkStereoConfig();
+        const float nearClip = get_nearClipPlane->Invoke<float>(mainFreeCameraCache);
+        const float farClip = get_farClipPlane->Invoke<float>(mainFreeCameraCache);
+
+        UnityResolve::UnityType::Matrix4x4 leftProjection{};
+        UnityResolve::UnityType::Matrix4x4 rightProjection{};
+        const bool leftOk = buildOffAxisProjectionMatrix(
+            nearClip,
+            farClip,
+            stereoConfig.leftEyeAngleLeftRadians,
+            stereoConfig.leftEyeAngleRightRadians,
+            stereoConfig.leftEyeAngleUpRadians,
+            stereoConfig.leftEyeAngleDownRadians,
+            leftProjection
+        );
+        const bool rightOk = buildOffAxisProjectionMatrix(
+            nearClip,
+            farClip,
+            stereoConfig.rightEyeAngleLeftRadians,
+            stereoConfig.rightEyeAngleRightRadians,
+            stereoConfig.rightEyeAngleUpRadians,
+            stereoConfig.rightEyeAngleDownRadians,
+            rightProjection
+        );
+        if (!leftOk || !rightOk) {
+            return;
+        }
+
+        set_projectionMatrix->Invoke<void>(mainFreeCameraCache, leftProjection);
+        set_projectionMatrix->Invoke<void>(stereoRightCameraCache, rightProjection);
+        bool cullingMatrixApplied = false;
+        if (get_worldToCameraMatrix && set_cullingMatrix) {
+            auto leftWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(mainFreeCameraCache);
+            auto rightWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(stereoRightCameraCache);
+            auto leftCulling = multiplyMatrix4x4(leftProjection, leftWorldToCamera);
+            auto rightCulling = multiplyMatrix4x4(rightProjection, rightWorldToCamera);
+            set_cullingMatrix->Invoke<void>(mainFreeCameraCache, leftCulling);
+            set_cullingMatrix->Invoke<void>(stereoRightCameraCache, rightCulling);
+            cullingMatrixApplied = true;
+        }
+        throttle([&]() {
+            LinkuraLocal::Log::InfoFmt(
+                "Stereo projection telemetry: near=%.4f far=%.2f yFlip=1 culling=%d leftFov=(%.4f,%.4f,%.4f,%.4f) rightFov=(%.4f,%.4f,%.4f,%.4f) leftM=(m00=%.5f,m02=%.5f,m11=%.5f,m12=%.5f,m22=%.5f,m23=%.5f,m32=%.5f) rightM=(m00=%.5f,m02=%.5f,m11=%.5f,m12=%.5f,m22=%.5f,m23=%.5f,m32=%.5f)",
+                nearClip,
+                farClip,
+                cullingMatrixApplied ? 1 : 0,
+                stereoConfig.leftEyeAngleLeftRadians,
+                stereoConfig.leftEyeAngleRightRadians,
+                stereoConfig.leftEyeAngleUpRadians,
+                stereoConfig.leftEyeAngleDownRadians,
+                stereoConfig.rightEyeAngleLeftRadians,
+                stereoConfig.rightEyeAngleRightRadians,
+                stereoConfig.rightEyeAngleUpRadians,
+                stereoConfig.rightEyeAngleDownRadians,
+                getMatrixElement(leftProjection, 0, 0),
+                getMatrixElement(leftProjection, 0, 2),
+                getMatrixElement(leftProjection, 1, 1),
+                getMatrixElement(leftProjection, 1, 2),
+                getMatrixElement(leftProjection, 2, 2),
+                getMatrixElement(leftProjection, 2, 3),
+                getMatrixElement(leftProjection, 3, 2),
+                getMatrixElement(rightProjection, 0, 0),
+                getMatrixElement(rightProjection, 0, 2),
+                getMatrixElement(rightProjection, 1, 1),
+                getMatrixElement(rightProjection, 1, 2),
+                getMatrixElement(rightProjection, 2, 2),
+                getMatrixElement(rightProjection, 2, 3),
+                getMatrixElement(rightProjection, 3, 2)
+            );
+        }, std::chrono::milliseconds(1000));
     }
 
     // 计算从 position 看向 lookAt 的水平角和垂直角
@@ -425,6 +653,8 @@ namespace LinkuraLocal::HookCamera {
                         auto rightEyePos = centerPos + eyeOffset;
                         Unity_set_position_Injected_Orig(freeCameraTransformCache, &leftEyePos);
                         Unity_set_position_Injected_Orig(stereoRightTransformCache, &rightEyePos);
+                        applyStereoProjectionMatrices();
+                        logStereoDisparity();
                     } else {
                         Unity_set_position_Injected_Orig(freeCameraTransformCache, &centerPos);
                     }

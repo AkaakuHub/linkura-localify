@@ -8,6 +8,7 @@
 #include "../config/Config.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <mutex>
 
 #ifdef GKMS_WINDOWS
@@ -569,6 +570,14 @@ namespace L4Camera {
         float filteredPitchDelta = 0.0f;
         float ipdMeters = 0.064f;
         float hmdVerticalFovDegrees = 90.0f;
+        float leftEyeAngleLeftRadians = -0.7853982f;
+        float leftEyeAngleRightRadians = 0.7853982f;
+        float leftEyeAngleUpRadians = 0.7853982f;
+        float leftEyeAngleDownRadians = -0.7853982f;
+        float rightEyeAngleLeftRadians = -0.7853982f;
+        float rightEyeAngleRightRadians = 0.7853982f;
+        float rightEyeAngleUpRadians = 0.7853982f;
+        float rightEyeAngleDownRadians = -0.7853982f;
         bool hasPrevHmdPose = false;
         bool hasPrevHeadAngle = false;
         uint32_t buttons = 0;
@@ -989,7 +998,21 @@ namespace L4Camera {
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
                               float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
-                              int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees) {
+                              int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees,
+                              float leftEyeAngleLeftRadians, float leftEyeAngleRightRadians,
+                              float leftEyeAngleUpRadians, float leftEyeAngleDownRadians,
+                              float rightEyeAngleLeftRadians, float rightEyeAngleRightRadians,
+                              float rightEyeAngleUpRadians, float rightEyeAngleDownRadians) {
+        constexpr float minFovAngle = -1.55f;
+        constexpr float maxFovAngle = 1.55f;
+        const float fallbackHalfVerticalRadians = std::clamp(hmdVerticalFovDegrees, 20.0f, 170.0f) * 0.00872664625f;
+        auto clampFov = [&](float value, float fallbackValue) {
+            if (!std::isfinite(value)) {
+                return fallbackValue;
+            }
+            return std::clamp(value, minFovAngle, maxFovAngle);
+        };
+
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
         networkCameraInputState.leftStickX = std::clamp(leftStickX, -1.0f, 1.0f);
         networkCameraInputState.leftStickY = std::clamp(leftStickY, -1.0f, 1.0f);
@@ -1007,6 +1030,30 @@ namespace L4Camera {
         networkCameraInputState.hmdPosZ = hmdPosZ;
         networkCameraInputState.ipdMeters = std::clamp(ipdMeters, 0.0f, 0.12f);
         networkCameraInputState.hmdVerticalFovDegrees = std::clamp(hmdVerticalFovDegrees, 20.0f, 170.0f);
+        networkCameraInputState.leftEyeAngleLeftRadians = clampFov(leftEyeAngleLeftRadians, -fallbackHalfVerticalRadians);
+        networkCameraInputState.leftEyeAngleRightRadians = clampFov(leftEyeAngleRightRadians, fallbackHalfVerticalRadians);
+        networkCameraInputState.leftEyeAngleUpRadians = clampFov(leftEyeAngleUpRadians, fallbackHalfVerticalRadians);
+        networkCameraInputState.leftEyeAngleDownRadians = clampFov(leftEyeAngleDownRadians, -fallbackHalfVerticalRadians);
+        networkCameraInputState.rightEyeAngleLeftRadians = clampFov(rightEyeAngleLeftRadians, -fallbackHalfVerticalRadians);
+        networkCameraInputState.rightEyeAngleRightRadians = clampFov(rightEyeAngleRightRadians, fallbackHalfVerticalRadians);
+        networkCameraInputState.rightEyeAngleUpRadians = clampFov(rightEyeAngleUpRadians, fallbackHalfVerticalRadians);
+        networkCameraInputState.rightEyeAngleDownRadians = clampFov(rightEyeAngleDownRadians, -fallbackHalfVerticalRadians);
+        if (networkCameraInputState.leftEyeAngleLeftRadians >= networkCameraInputState.leftEyeAngleRightRadians) {
+            networkCameraInputState.leftEyeAngleLeftRadians = -fallbackHalfVerticalRadians;
+            networkCameraInputState.leftEyeAngleRightRadians = fallbackHalfVerticalRadians;
+        }
+        if (networkCameraInputState.leftEyeAngleDownRadians >= networkCameraInputState.leftEyeAngleUpRadians) {
+            networkCameraInputState.leftEyeAngleDownRadians = -fallbackHalfVerticalRadians;
+            networkCameraInputState.leftEyeAngleUpRadians = fallbackHalfVerticalRadians;
+        }
+        if (networkCameraInputState.rightEyeAngleLeftRadians >= networkCameraInputState.rightEyeAngleRightRadians) {
+            networkCameraInputState.rightEyeAngleLeftRadians = -fallbackHalfVerticalRadians;
+            networkCameraInputState.rightEyeAngleRightRadians = fallbackHalfVerticalRadians;
+        }
+        if (networkCameraInputState.rightEyeAngleDownRadians >= networkCameraInputState.rightEyeAngleUpRadians) {
+            networkCameraInputState.rightEyeAngleDownRadians = -fallbackHalfVerticalRadians;
+            networkCameraInputState.rightEyeAngleUpRadians = fallbackHalfVerticalRadians;
+        }
         networkCameraInputState.buttons = static_cast<uint32_t>(buttons);
         networkCameraInputState.flags = static_cast<uint32_t>(flags);
         static auto lastTelemetryLogAt = std::chrono::steady_clock::now();
@@ -1014,9 +1061,17 @@ namespace L4Camera {
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTelemetryLogAt).count() >= 1000) {
             lastTelemetryLogAt = now;
             LinkuraLocal::Log::InfoFmt(
-                "Network input telemetry: ipd=%.4f vFov=%.2f baseFov=%.2f yaw=%.3f pitch=%.3f roll=%.3f flags=%u buttons=%u",
+                "Network input telemetry: ipd=%.4f vFov=%.2f leftFov=(%.4f,%.4f,%.4f,%.4f) rightFov=(%.4f,%.4f,%.4f,%.4f) baseFov=%.2f yaw=%.3f pitch=%.3f roll=%.3f flags=%u buttons=%u",
                 networkCameraInputState.ipdMeters,
                 networkCameraInputState.hmdVerticalFovDegrees,
+                networkCameraInputState.leftEyeAngleLeftRadians,
+                networkCameraInputState.leftEyeAngleRightRadians,
+                networkCameraInputState.leftEyeAngleUpRadians,
+                networkCameraInputState.leftEyeAngleDownRadians,
+                networkCameraInputState.rightEyeAngleLeftRadians,
+                networkCameraInputState.rightEyeAngleRightRadians,
+                networkCameraInputState.rightEyeAngleUpRadians,
+                networkCameraInputState.rightEyeAngleDownRadians,
                 baseCamera.fov,
                 networkCameraInputState.yaw,
                 networkCameraInputState.pitch,
@@ -1053,6 +1108,14 @@ namespace L4Camera {
         NetworkStereoConfig config{};
         config.enabled = true;
         config.ipdMeters = networkCameraInputState.ipdMeters;
+        config.leftEyeAngleLeftRadians = networkCameraInputState.leftEyeAngleLeftRadians;
+        config.leftEyeAngleRightRadians = networkCameraInputState.leftEyeAngleRightRadians;
+        config.leftEyeAngleUpRadians = networkCameraInputState.leftEyeAngleUpRadians;
+        config.leftEyeAngleDownRadians = networkCameraInputState.leftEyeAngleDownRadians;
+        config.rightEyeAngleLeftRadians = networkCameraInputState.rightEyeAngleLeftRadians;
+        config.rightEyeAngleRightRadians = networkCameraInputState.rightEyeAngleRightRadians;
+        config.rightEyeAngleUpRadians = networkCameraInputState.rightEyeAngleUpRadians;
+        config.rightEyeAngleDownRadians = networkCameraInputState.rightEyeAngleDownRadians;
         return config;
     }
 

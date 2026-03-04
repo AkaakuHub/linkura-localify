@@ -287,13 +287,25 @@ namespace L4Camera {
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
                               float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
-                              int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees);
+                              int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees,
+                              float leftEyeAngleLeftRadians, float leftEyeAngleRightRadians,
+                              float leftEyeAngleUpRadians, float leftEyeAngleDownRadians,
+                              float rightEyeAngleLeftRadians, float rightEyeAngleRightRadians,
+                              float rightEyeAngleUpRadians, float rightEyeAngleDownRadians);
 	void initCameraSettings();
     void clearRenderSet();
 
     struct NetworkStereoConfig {
         bool enabled = false;
         float ipdMeters = 0.064f;
+        float leftEyeAngleLeftRadians = -0.7853982f;
+        float leftEyeAngleRightRadians = 0.7853982f;
+        float leftEyeAngleUpRadians = 0.7853982f;
+        float leftEyeAngleDownRadians = -0.7853982f;
+        float rightEyeAngleLeftRadians = -0.7853982f;
+        float rightEyeAngleRightRadians = 0.7853982f;
+        float rightEyeAngleUpRadians = 0.7853982f;
+        float rightEyeAngleDownRadians = -0.7853982f;
     };
 
     NetworkStereoConfig GetNetworkStereoConfig();

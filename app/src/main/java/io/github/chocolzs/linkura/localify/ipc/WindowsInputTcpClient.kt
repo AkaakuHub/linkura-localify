@@ -26,7 +26,7 @@ class WindowsInputTcpClient private constructor() {
         private const val HOST = "10.0.2.2"
         private const val PORT = 39090
         private const val HEADER_SIZE = 8
-        private const val BODY_LENGTH_V1 = 80
+        private const val BODY_LENGTH_V1 = 112
         private const val MAGIC = 0x4C4D4554
         private const val PROTOCOL_VERSION_V1 = 1
         private const val CONNECT_TIMEOUT_MS = 2000
@@ -69,7 +69,15 @@ class WindowsInputTcpClient private constructor() {
         val hmdPosZ: Float,
         val buttons: Int,
         val ipdMeters: Float,
-        val hmdVerticalFovDegrees: Float
+        val hmdVerticalFovDegrees: Float,
+        val leftEyeAngleLeftRadians: Float,
+        val leftEyeAngleRightRadians: Float,
+        val leftEyeAngleUpRadians: Float,
+        val leftEyeAngleDownRadians: Float,
+        val rightEyeAngleLeftRadians: Float,
+        val rightEyeAngleRightRadians: Float,
+        val rightEyeAngleUpRadians: Float,
+        val rightEyeAngleDownRadians: Float
     )
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -157,14 +165,22 @@ class WindowsInputTcpClient private constructor() {
                     packet.buttons,
                     packet.flags,
                     packet.ipdMeters,
-                    packet.hmdVerticalFovDegrees
+                    packet.hmdVerticalFovDegrees,
+                    packet.leftEyeAngleLeftRadians,
+                    packet.leftEyeAngleRightRadians,
+                    packet.leftEyeAngleUpRadians,
+                    packet.leftEyeAngleDownRadians,
+                    packet.rightEyeAngleLeftRadians,
+                    packet.rightEyeAngleRightRadians,
+                    packet.rightEyeAngleUpRadians,
+                    packet.rightEyeAngleDownRadians
                 )
                 val now = System.currentTimeMillis()
                 if (now - lastTelemetryLogMs >= 1000L) {
                     lastTelemetryLogMs = now
                     Log.i(
                         CLIENT_TAG,
-                        "Input telemetry: ver=1 ipd=${"%.4f".format(packet.ipdMeters)} vFovDeg=${"%.2f".format(packet.hmdVerticalFovDegrees)} yaw=${"%.3f".format(packet.yaw)} pitch=${"%.3f".format(packet.pitch)} roll=${"%.3f".format(packet.roll)}"
+                        "Input telemetry: ver=1 ipd=${"%.4f".format(packet.ipdMeters)} vFovDeg=${"%.2f".format(packet.hmdVerticalFovDegrees)} leftFov=(${String.format("%.4f", packet.leftEyeAngleLeftRadians)},${String.format("%.4f", packet.leftEyeAngleRightRadians)},${String.format("%.4f", packet.leftEyeAngleUpRadians)},${String.format("%.4f", packet.leftEyeAngleDownRadians)}) rightFov=(${String.format("%.4f", packet.rightEyeAngleLeftRadians)},${String.format("%.4f", packet.rightEyeAngleRightRadians)},${String.format("%.4f", packet.rightEyeAngleUpRadians)},${String.format("%.4f", packet.rightEyeAngleDownRadians)}) yaw=${"%.3f".format(packet.yaw)} pitch=${"%.3f".format(packet.pitch)} roll=${"%.3f".format(packet.roll)}"
                     )
                 }
                 lastPacketTimeMs = System.currentTimeMillis()
@@ -200,7 +216,15 @@ class WindowsInputTcpClient private constructor() {
             0,
             0,
             0.064f,
-            90.0f
+            90.0f,
+            -0.7853982f,
+            0.7853982f,
+            0.7853982f,
+            -0.7853982f,
+            -0.7853982f,
+            0.7853982f,
+            0.7853982f,
+            -0.7853982f
         )
         zeroInputApplied = true
     }
@@ -254,9 +278,27 @@ class WindowsInputTcpClient private constructor() {
         } else {
             90.0f
         }
+        val leftEyeAngleLeftRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { -0.7853982f }
+        val leftEyeAngleRightRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { 0.7853982f }
+        val leftEyeAngleUpRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { 0.7853982f }
+        val leftEyeAngleDownRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { -0.7853982f }
+        val rightEyeAngleLeftRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { -0.7853982f }
+        val rightEyeAngleRightRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { 0.7853982f }
+        val rightEyeAngleUpRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { 0.7853982f }
+        val rightEyeAngleDownRadians = if (bb.remaining() >= Float.SIZE_BYTES) { bb.float } else { -0.7853982f }
 
         val safeIpdMeters = ipdMeters.coerceIn(0.0f, 0.12f)
         val safeHmdVerticalFovDegrees = hmdVerticalFovDegrees.coerceIn(20.0f, 170.0f)
+        val minFovAngle = -1.55f
+        val maxFovAngle = 1.55f
+        val safeLeftEyeAngleLeftRadians = leftEyeAngleLeftRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeLeftEyeAngleRightRadians = leftEyeAngleRightRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeLeftEyeAngleUpRadians = leftEyeAngleUpRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeLeftEyeAngleDownRadians = leftEyeAngleDownRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeRightEyeAngleLeftRadians = rightEyeAngleLeftRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeRightEyeAngleRightRadians = rightEyeAngleRightRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeRightEyeAngleUpRadians = rightEyeAngleUpRadians.coerceIn(minFovAngle, maxFovAngle)
+        val safeRightEyeAngleDownRadians = rightEyeAngleDownRadians.coerceIn(minFovAngle, maxFovAngle)
 
         return InputPacket(
             flags = flags,
@@ -276,7 +318,15 @@ class WindowsInputTcpClient private constructor() {
             hmdPosZ = hmdPosZ,
             buttons = buttons,
             ipdMeters = safeIpdMeters,
-            hmdVerticalFovDegrees = safeHmdVerticalFovDegrees
+            hmdVerticalFovDegrees = safeHmdVerticalFovDegrees,
+            leftEyeAngleLeftRadians = safeLeftEyeAngleLeftRadians,
+            leftEyeAngleRightRadians = safeLeftEyeAngleRightRadians,
+            leftEyeAngleUpRadians = safeLeftEyeAngleUpRadians,
+            leftEyeAngleDownRadians = safeLeftEyeAngleDownRadians,
+            rightEyeAngleLeftRadians = safeRightEyeAngleLeftRadians,
+            rightEyeAngleRightRadians = safeRightEyeAngleRightRadians,
+            rightEyeAngleUpRadians = safeRightEyeAngleUpRadians,
+            rightEyeAngleDownRadians = safeRightEyeAngleDownRadians
         )
     }
 

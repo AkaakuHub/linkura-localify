@@ -133,12 +133,22 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput
                                                                                 jint buttons,
                                                                                 jint flags,
                                                                                 jfloat ipdMeters,
-                                                                                jfloat hmdVerticalFovDegrees) {
+                                                                                jfloat hmdVerticalFovDegrees,
+                                                                                jfloat leftEyeAngleLeftRadians,
+                                                                                jfloat leftEyeAngleRightRadians,
+                                                                                jfloat leftEyeAngleUpRadians,
+                                                                                jfloat leftEyeAngleDownRadians,
+                                                                                jfloat rightEyeAngleLeftRadians,
+                                                                                jfloat rightEyeAngleRightRadians,
+                                                                                jfloat rightEyeAngleUpRadians,
+                                                                                jfloat rightEyeAngleDownRadians) {
     (void)env;
     (void)clazz;
     L4Camera::on_cam_network_input(leftStickX, leftStickY, rightStickX, rightStickY,
                                    leftTrigger, leftGrip, rightTrigger, rightGrip,
-                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags, ipdMeters, hmdVerticalFovDegrees);
+                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags, ipdMeters, hmdVerticalFovDegrees,
+                                   leftEyeAngleLeftRadians, leftEyeAngleRightRadians, leftEyeAngleUpRadians, leftEyeAngleDownRadians,
+                                   rightEyeAngleLeftRadians, rightEyeAngleRightRadians, rightEyeAngleUpRadians, rightEyeAngleDownRadians);
 }
 
 extern "C"
