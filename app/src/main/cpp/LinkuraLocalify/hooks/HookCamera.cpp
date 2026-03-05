@@ -755,6 +755,45 @@ namespace LinkuraLocal::HookCamera {
         }
     }
 
+    DEFINE_HOOK(
+        void,
+        AudienceRenderingAreaManager_SetCamera,
+        (
+            Il2cppUtils::Il2CppObject* self,
+            UnityResolve::UnityType::Camera* camera,
+            UnityResolve::UnityType::Camera* subCamera,
+            void* method
+        )
+    ) {
+        UnityResolve::UnityType::Camera* patchedSubCamera = subCamera;
+        bool patched = false;
+        if (
+            isStereoRequested()
+            && Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)
+            && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)
+            && camera == mainFreeCameraCache
+            && subCamera != stereoRightCameraCache
+        ) {
+            patchedSubCamera = stereoRightCameraCache;
+            patched = true;
+        }
+
+        throttle([&]() {
+            Log::InfoFmt(
+                "AudienceSetCameraHook: patched=%d self=%p camera=%p sub=%p patchedSub=%p left=%p right=%p",
+                patched ? 1 : 0,
+                self,
+                camera,
+                subCamera,
+                patchedSubCamera,
+                mainFreeCameraCache,
+                stereoRightCameraCache
+            );
+        }, std::chrono::milliseconds(1200));
+
+        return AudienceRenderingAreaManager_SetCamera_Orig(self, camera, patchedSubCamera, method);
+    }
+
     DEFINE_HOOK(EGLBoolean, Probe_eglSwapBuffers, (EGLDisplay display, EGLSurface surface)) {
         if (eglGetCurrentContext() != EGL_NO_CONTEXT && eglGetCurrentDisplay() != EGL_NO_DISPLAY) {
             LinkuraLocal::StereoVideo::OnEglSwapBuffers(display, surface);
@@ -1287,6 +1326,15 @@ namespace LinkuraLocal::HookCamera {
                                                                       "Camera", "set_fieldOfView"));
         ADD_HOOK(EndCameraRendering, Il2cppUtils::GetMethodPointer("UnityEngine.CoreModule.dll", "UnityEngine.Rendering",
                                                                    "RenderPipeline", "EndCameraRendering"));
+        ADD_HOOK(
+            AudienceRenderingAreaManager_SetCamera,
+            Il2cppUtils::GetMethodPointer(
+                "Core.dll",
+                "Inspix.Audience.IndirectRendering",
+                "AudienceRenderingAreaManager",
+                "SetCamera"
+            )
+        );
 
         ADD_HOOK(Unity_Renderer_set_enabled, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Renderer::set_enabled(System.Boolean)"));
 
