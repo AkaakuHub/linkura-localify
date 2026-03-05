@@ -19,6 +19,8 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -32,6 +34,9 @@ class WebRtcSessionManager private constructor() {
         private const val CAPTURE_HEIGHT = 1080
         private const val CAPTURE_FPS = 60
         private const val VIDEO_TRACK_ID = "bridge-video-track"
+        private const val INPUT_DATA_CHANNEL_LABEL = "input-state"
+        private const val INPUT_PAYLOAD_SIZE = 104
+        private const val INPUT_TIMEOUT_MS = 300L
         private const val VP8_MIN_BITRATE_KBPS = 6000
         private const val VP8_START_BITRATE_KBPS = 14000
         private const val VP8_MAX_BITRATE_KBPS = 28000
@@ -59,6 +64,11 @@ class WebRtcSessionManager private constructor() {
     private var eglBase: EglBase? = null
     private var appContext: Context? = null
     private var statsExecutor: ScheduledExecutorService? = null
+    private var inputWatchdogExecutor: ScheduledExecutorService? = null
+    private var inputDataChannel: DataChannel? = null
+    private var lastInputPacketAtMs: Long = 0L
+    private var zeroInputApplied = true
+    private val peerLifecycleLock = Any()
 
     fun start(context: Context) {
         if (!started.compareAndSet(false, true)) {
@@ -76,7 +86,8 @@ class WebRtcSessionManager private constructor() {
         }
         signalingClient.setOnConnectedListener {
             try {
-                Log.i(TAG, "Signaling connected callback: creating fresh offer")
+                Log.i(TAG, "Signaling connected callback: rebuilding peer connection and creating fresh offer")
+                rebuildPeerConnectionForReconnect()
                 createOffer()
             } catch (e: Exception) {
                 Log.e(TAG, "Signaling connected callback failed", e)
@@ -84,6 +95,7 @@ class WebRtcSessionManager private constructor() {
         }
         signalingClient.start()
         startStatsLogging()
+        startInputWatchdog()
     }
 
     fun stop() {
@@ -91,10 +103,9 @@ class WebRtcSessionManager private constructor() {
             return
         }
         signalingClient.stop()
-        stopVideoTrack()
-        peerConnection?.close()
-        peerConnection?.dispose()
-        peerConnection = null
+        synchronized(peerLifecycleLock) {
+            teardownPeerConnectionLocked()
+        }
         factory?.dispose()
         factory = null
         try {
@@ -104,6 +115,8 @@ class WebRtcSessionManager private constructor() {
         factoryEglBase = null
         appContext = null
         stopStatsLogging()
+        stopInputWatchdog()
+        applyZeroInput()
         try {
             LinkuraHookMain.setVideoEncoderSurface(null, 0, 0)
         } catch (_: Exception) {
@@ -130,6 +143,12 @@ class WebRtcSessionManager private constructor() {
     }
 
     private fun buildPeerConnection() {
+        synchronized(peerLifecycleLock) {
+            buildPeerConnectionLocked()
+        }
+    }
+
+    private fun buildPeerConnectionLocked() {
         val activeFactory = factory ?: return
         val iceServer = PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
         val config = PeerConnection.RTCConfiguration(listOf(iceServer))
@@ -175,6 +194,9 @@ class WebRtcSessionManager private constructor() {
 
             override fun onDataChannel(channel: DataChannel) {
                 Log.i(TAG, "Remote data channel opened: ${channel.label()}")
+                if (channel.label() == INPUT_DATA_CHANNEL_LABEL) {
+                    attachInputDataChannel(channel)
+                }
             }
 
             override fun onRenegotiationNeeded() {
@@ -185,8 +207,229 @@ class WebRtcSessionManager private constructor() {
         })
 
         val activePeerConnection = peerConnection ?: return
+        createInputDataChannel(activePeerConnection)
         val context = appContext ?: return
         startVideoTrack(context, activeFactory, activePeerConnection)
+    }
+
+    private fun rebuildPeerConnectionForReconnect() {
+        synchronized(peerLifecycleLock) {
+            if (!started.get()) {
+                return
+            }
+            teardownPeerConnectionLocked()
+            buildPeerConnectionLocked()
+        }
+    }
+
+    private fun teardownPeerConnectionLocked() {
+        stopVideoTrack()
+        clearInputDataChannel()
+        try {
+            peerConnection?.close()
+        } catch (_: Exception) {
+        }
+        try {
+            peerConnection?.dispose()
+        } catch (_: Exception) {
+        }
+        peerConnection = null
+    }
+
+    private fun createInputDataChannel(activePeerConnection: PeerConnection) {
+        clearInputDataChannel()
+        val init = DataChannel.Init().apply {
+            ordered = false
+            maxRetransmits = 0
+        }
+        val channel = activePeerConnection.createDataChannel(INPUT_DATA_CHANNEL_LABEL, init)
+        if (channel == null) {
+            Log.w(TAG, "Failed to create input data channel")
+            return
+        }
+        attachInputDataChannel(channel)
+    }
+
+    private fun attachInputDataChannel(channel: DataChannel) {
+        clearInputDataChannel()
+        inputDataChannel = channel
+        channel.registerObserver(object : DataChannel.Observer {
+            override fun onBufferedAmountChange(previousAmount: Long) {
+            }
+
+            override fun onStateChange() {
+                val state = channel.state()
+                Log.i(TAG, "Input data channel state: label=${channel.label()} state=$state")
+                if (state == DataChannel.State.OPEN) {
+                    lastInputPacketAtMs = System.currentTimeMillis()
+                } else if (state == DataChannel.State.CLOSING || state == DataChannel.State.CLOSED) {
+                    applyZeroInput()
+                }
+            }
+
+            override fun onMessage(buffer: DataChannel.Buffer) {
+                if (!buffer.binary) {
+                    return
+                }
+                val payloadBuffer = buffer.data
+                val payload = ByteArray(payloadBuffer.remaining())
+                payloadBuffer.get(payload)
+                handleInputPayload(payload)
+            }
+        })
+    }
+
+    private fun clearInputDataChannel() {
+        val channel = inputDataChannel ?: return
+        try {
+            channel.unregisterObserver()
+        } catch (_: Exception) {
+        }
+        try {
+            channel.close()
+        } catch (_: Exception) {
+        }
+        try {
+            channel.dispose()
+        } catch (_: Exception) {
+        }
+        inputDataChannel = null
+    }
+
+    private fun handleInputPayload(payload: ByteArray) {
+        if (payload.size != INPUT_PAYLOAD_SIZE) {
+            return
+        }
+        val bb = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+
+        val leftStickX = bb.float
+        val leftStickY = bb.float
+        val rightStickX = bb.float
+        val rightStickY = bb.float
+        val leftTrigger = bb.float
+        val leftGrip = bb.float
+        val rightTrigger = bb.float
+        val rightGrip = bb.float
+        val yaw = bb.float
+        val pitch = bb.float
+        val roll = bb.float
+        val hmdPosX = bb.float
+        val hmdPosY = bb.float
+        val hmdPosZ = bb.float
+        val buttons = bb.int
+        val flags = bb.int
+        val ipdMeters = bb.float
+        val hmdVerticalFovDegrees = bb.float
+        val leftEyeAngleLeftRadians = bb.float
+        val leftEyeAngleRightRadians = bb.float
+        val leftEyeAngleUpRadians = bb.float
+        val leftEyeAngleDownRadians = bb.float
+        val rightEyeAngleLeftRadians = bb.float
+        val rightEyeAngleRightRadians = bb.float
+        val rightEyeAngleUpRadians = bb.float
+        val rightEyeAngleDownRadians = bb.float
+
+        val safeIpdMeters = ipdMeters.coerceIn(0.0f, 0.12f)
+        val safeHmdVerticalFovDegrees = hmdVerticalFovDegrees.coerceIn(20.0f, 170.0f)
+        val minFovAngle = -1.55f
+        val maxFovAngle = 1.55f
+
+        LinkuraHookMain.applyWindowsCameraInput(
+            leftStickX,
+            leftStickY,
+            rightStickX,
+            rightStickY,
+            leftTrigger,
+            leftGrip,
+            rightTrigger,
+            rightGrip,
+            yaw,
+            pitch,
+            roll,
+            hmdPosX,
+            hmdPosY,
+            hmdPosZ,
+            buttons,
+            flags,
+            safeIpdMeters,
+            safeHmdVerticalFovDegrees,
+            leftEyeAngleLeftRadians.coerceIn(minFovAngle, maxFovAngle),
+            leftEyeAngleRightRadians.coerceIn(minFovAngle, maxFovAngle),
+            leftEyeAngleUpRadians.coerceIn(minFovAngle, maxFovAngle),
+            leftEyeAngleDownRadians.coerceIn(minFovAngle, maxFovAngle),
+            rightEyeAngleLeftRadians.coerceIn(minFovAngle, maxFovAngle),
+            rightEyeAngleRightRadians.coerceIn(minFovAngle, maxFovAngle),
+            rightEyeAngleUpRadians.coerceIn(minFovAngle, maxFovAngle),
+            rightEyeAngleDownRadians.coerceIn(minFovAngle, maxFovAngle)
+        )
+
+        zeroInputApplied = false
+        lastInputPacketAtMs = System.currentTimeMillis()
+    }
+
+    private fun startInputWatchdog() {
+        stopInputWatchdog()
+        lastInputPacketAtMs = System.currentTimeMillis()
+        inputWatchdogExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "WebRtcInputWatchdog").apply { isDaemon = true }
+        }.also { executor ->
+            executor.scheduleAtFixedRate(
+                {
+                    try {
+                        val now = System.currentTimeMillis()
+                        if (now - lastInputPacketAtMs > INPUT_TIMEOUT_MS) {
+                            applyZeroInput()
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Input watchdog failed: ${e.message}")
+                    }
+                },
+                50,
+                50,
+                TimeUnit.MILLISECONDS
+            )
+        }
+    }
+
+    private fun stopInputWatchdog() {
+        val executor = inputWatchdogExecutor ?: return
+        executor.shutdownNow()
+        inputWatchdogExecutor = null
+    }
+
+    private fun applyZeroInput() {
+        if (zeroInputApplied) {
+            return
+        }
+        LinkuraHookMain.applyWindowsCameraInput(
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0,
+            0,
+            0.064f,
+            90.0f,
+            -0.7853982f,
+            0.7853982f,
+            0.7853982f,
+            -0.7853982f,
+            -0.7853982f,
+            0.7853982f,
+            0.7853982f,
+            -0.7853982f
+        )
+        zeroInputApplied = true
     }
 
     private fun startVideoTrack(

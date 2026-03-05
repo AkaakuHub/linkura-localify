@@ -51,7 +51,6 @@ import kotlinx.serialization.json.Json
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
-import io.github.chocolzs.linkura.localify.ipc.WindowsInputTcpClient
 import io.github.chocolzs.linkura.localify.ipc.WebRtcSessionManager
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
@@ -72,7 +71,6 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private var gameActivity: Activity? = null
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
-    private val windowsInputTcpClient: WindowsInputTcpClient by lazy { WindowsInputTcpClient.getInstance() }
     private val webRtcSessionManager: WebRtcSessionManager by lazy { WebRtcSessionManager.getInstance() }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
@@ -861,15 +859,6 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             
             // Additional failure diagnosis
             diagnosePotentialConnectionIssues(context)
-        }
-
-        val tcpStartResult = windowsInputTcpClient.startClient()
-        if (tcpStartResult) {
-            Log.i(TAG, "Windows input TCP client started successfully")
-            LogExporter.addLogEntry(TAG, "I", "Windows input TCP client started successfully")
-        } else {
-            Log.w(TAG, "Windows input TCP client failed to start")
-            LogExporter.addLogEntry(TAG, "W", "Windows input TCP client failed to start")
         }
 
         setStereoVideoStreamingEnabledAsync(false, "init")
