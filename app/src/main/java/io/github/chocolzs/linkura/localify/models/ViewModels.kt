@@ -41,6 +41,10 @@ class CameraSettingsCollapsibleBoxViewModel(initiallyExpanded: Boolean = false) 
     override var expanded by mutableStateOf(initiallyExpanded)
 }
 
+class VrCollapsibleBoxViewModel(initiallyExpanded: Boolean = false) : CollapsibleBoxViewModel(initiallyExpanded) {
+    override var expanded by mutableStateOf(initiallyExpanded)
+}
+
 class LiveStreamCollapsibleBoxViewModel(initiallyExpanded: Boolean = false) : CollapsibleBoxViewModel(initiallyExpanded) {
     override var expanded by mutableStateOf(initiallyExpanded)
 }
@@ -110,6 +114,16 @@ class CameraSettingsCollapsibleBoxViewModelFactory(private val initiallyExpanded
         if (modelClass.isAssignableFrom(CameraSettingsCollapsibleBoxViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return CameraSettingsCollapsibleBoxViewModel(initiallyExpanded) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+class VrCollapsibleBoxViewModelFactory(private val initiallyExpanded: Boolean) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(VrCollapsibleBoxViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return VrCollapsibleBoxViewModel(initiallyExpanded) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

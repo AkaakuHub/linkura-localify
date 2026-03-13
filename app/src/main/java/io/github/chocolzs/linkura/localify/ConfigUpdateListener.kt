@@ -61,6 +61,7 @@ interface ConfigListener {
     fun onArchiveStartTimeChanged(value: Int)
     fun onAvoidAccidentalTouchChanged(value: Boolean)
     fun onAssetsUrlPrefixChanged(value: String)
+    fun onSignalingTcpPortChanged(value: String)
     fun onHideCharacterShadowChanged(value: Boolean)
     fun onHideLiveStreamSceneItemsLevel(value: Int)
     fun onHideLiveStreamCharacterItems(value: Boolean)
@@ -409,6 +410,22 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
 
     override fun onAssetsUrlPrefixChanged(value: String) {
         config.assetsUrlPrefix = value
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onSignalingTcpPortChanged(value: String) {
+        val trimmedValue = value.trim()
+        if (trimmedValue.isEmpty()) {
+            return
+        }
+
+        val port = trimmedValue.toIntOrNull() ?: return
+        if (port !in 1..65535) {
+            return
+        }
+
+        config.signalingTcpPort = port
         saveConfig()
         sendConfigUpdate(config)
     }

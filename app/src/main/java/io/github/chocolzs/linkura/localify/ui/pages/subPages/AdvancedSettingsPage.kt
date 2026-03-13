@@ -30,7 +30,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -54,7 +56,10 @@ import io.github.chocolzs.linkura.localify.models.StorySettingsCollapsibleBoxVie
 import io.github.chocolzs.linkura.localify.models.CameraSettingsCollapsibleBoxViewModel
 import io.github.chocolzs.linkura.localify.models.CameraSettingsCollapsibleBoxViewModelFactory
 import io.github.chocolzs.linkura.localify.models.LinkuraConfig
+import io.github.chocolzs.linkura.localify.models.VrCollapsibleBoxViewModel
+import io.github.chocolzs.linkura.localify.models.VrCollapsibleBoxViewModelFactory
 import io.github.chocolzs.linkura.localify.ui.components.base.CollapsibleBox
+import io.github.chocolzs.linkura.localify.ui.components.GakuButton
 import io.github.chocolzs.linkura.localify.ui.components.GakuSwitch
 import io.github.chocolzs.linkura.localify.ui.components.GakuTextInput
 import io.github.chocolzs.linkura.localify.ui.components.GakuSlider
@@ -241,6 +246,8 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
         viewModel(factory = StorySettingsCollapsibleBoxViewModelFactory(initiallyExpanded = false))
     val cameraSettingsViewModel: CameraSettingsCollapsibleBoxViewModel =
         viewModel(factory = CameraSettingsCollapsibleBoxViewModelFactory(initiallyExpanded = false))
+    val vrViewModel: VrCollapsibleBoxViewModel =
+        viewModel(factory = VrCollapsibleBoxViewModelFactory(initiallyExpanded = false))
     val liveStreamViewModel: LiveStreamCollapsibleBoxViewModel =
         viewModel(factory = LiveStreamCollapsibleBoxViewModelFactory(initiallyExpanded = false))
 
@@ -443,6 +450,58 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
                 }
             }
 
+            Spacer(Modifier.height(6.dp))
+        }
+
+        item {
+            var signalingTcpPortText by rememberSaveable { mutableStateOf(config.value.signalingTcpPort.toString()) }
+
+            LaunchedEffect(config.value.signalingTcpPort) {
+                signalingTcpPortText = config.value.signalingTcpPort.toString()
+            }
+
+            GakuGroupBox(
+                modifier = modifier,
+                title = "VR",
+                onHeadClick = {
+                    vrViewModel.expanded = !vrViewModel.expanded
+                }
+            ) {
+                CollapsibleBox(
+                    modifier = modifier,
+                    expandState = vrViewModel.expanded,
+                    collapsedHeight = 0.dp,
+                    showExpand = false
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GakuTextInput(
+                            value = signalingTcpPortText,
+                            onValueChange = { value ->
+                                signalingTcpPortText = value
+                            },
+                            modifier = Modifier.width(320.dp),
+                            label = {
+                                Text(text = "WebRTC signaling TCP port")
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        GakuButton(
+                            onClick = {
+                                context?.onSignalingTcpPortChanged(signalingTcpPortText)
+                            },
+                            text = "Save",
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(56.dp)
+                                .padding(bottom = 4.dp)
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(6.dp))
         }
 

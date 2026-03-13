@@ -59,6 +59,7 @@ namespace LinkuraLocal::Config {
     int hideLiveStreamSceneItemsLevel = 0;
     bool hideLiveStreamCharacterItems = false;
     std::string localeCode = "ja-JP";
+    int signalingTcpPort = 39200;
     
     // Archive configuration mapping: archives_id -> item data
     std::unordered_map<std::string, nlohmann::json> archiveConfigMap;
@@ -129,6 +130,7 @@ namespace LinkuraLocal::Config {
             GetConfigItem(hideLiveStreamSceneItemsLevel);
             GetConfigItem(hideLiveStreamCharacterItems);
             GetConfigItem(localeCode);
+            GetConfigItem(signalingTcpPort);
             if (localeCode != "ja-JP") {
                 enableLocale = true;
             }
@@ -213,6 +215,7 @@ namespace LinkuraLocal::Config {
                 if (configUpdate.has_archive_start_time()) archiveStartTime = configUpdate.archive_start_time();
                 if (configUpdate.has_avoid_accidental_touch()) avoidAccidentalTouch = configUpdate.avoid_accidental_touch();
                 if (configUpdate.has_assets_url_prefix()) assetsUrlPrefix = configUpdate.assets_url_prefix();
+                if (configUpdate.has_signaling_tcp_port()) signalingTcpPort = configUpdate.signaling_tcp_port();
                 if (configUpdate.has_hide_character_shadow()) hideCharacterShadow = configUpdate.hide_character_shadow();
                 if (configUpdate.has_hide_live_stream_scene_items_level()) hideLiveStreamSceneItemsLevel = configUpdate.hide_live_stream_scene_items_level();
                 if (configUpdate.has_hide_live_stream_character_items()) hideLiveStreamCharacterItems = configUpdate.hide_live_stream_character_items();

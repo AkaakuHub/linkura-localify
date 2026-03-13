@@ -30,6 +30,7 @@ import java.util.regex.Pattern
 class WebRtcSessionManager private constructor() {
     companion object {
         private const val TAG = "WebRtcSessionManager"
+        private const val DEFAULT_SIGNALING_PORT = 39200
         private const val CAPTURE_WIDTH = 1920
         private const val CAPTURE_HEIGHT = 1080
         private const val CAPTURE_FPS = 60
@@ -54,6 +55,8 @@ class WebRtcSessionManager private constructor() {
 
     private val signalingClient = WebRtcSignalingTcpClient()
     private val started = AtomicBoolean(false)
+    @Volatile
+    private var signalingPort: Int = DEFAULT_SIGNALING_PORT
     private var factory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var factoryEglBase: EglBase? = null
@@ -74,6 +77,7 @@ class WebRtcSessionManager private constructor() {
             return
         }
         appContext = context.applicationContext
+        signalingClient.setPort(signalingPort)
         ensureFactory(context)
         buildPeerConnection()
         signalingClient.setOnMessageListener { message ->
@@ -94,6 +98,24 @@ class WebRtcSessionManager private constructor() {
         }
         signalingClient.start()
         startInputWatchdog()
+    }
+
+    fun setSignalingPort(port: Int) {
+        val sanitizedPort = if (port in 1..65535) {
+            port
+        } else {
+            DEFAULT_SIGNALING_PORT
+        }
+
+        if (signalingPort == sanitizedPort) {
+            return
+        }
+
+        signalingPort = sanitizedPort
+        signalingClient.setPort(sanitizedPort)
+        if (started.get()) {
+            signalingClient.restart()
+        }
     }
 
     fun stop() {

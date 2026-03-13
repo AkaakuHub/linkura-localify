@@ -55,6 +55,7 @@ import io.github.chocolzs.linkura.localify.ipc.WebRtcSessionManager
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
 val TAG = "LinkuraLocalify"
+private const val DEFAULT_SIGNALING_TCP_PORT = 39200
 
 class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private lateinit var modulePath: String
@@ -151,6 +152,12 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private val configUpdateHandler = object : MessageRouter.MessageTypeHandler {
         override fun handleMessage(payload: ByteArray): Boolean {
             return try {
+                val configUpdate = ConfigUpdate.parseFrom(payload)
+                if (configUpdate.hasSignalingTcpPort()) {
+                    val signalingPort = sanitizeSignalingTcpPort(configUpdate.signalingTcpPort)
+                    webRtcSessionManager.setSignalingPort(signalingPort)
+                    linkuraConfig?.signalingTcpPort = signalingPort
+                }
                 updateConfig(payload)
                 Log.i(TAG, "Config update sent to native layer")
                 true
@@ -924,6 +931,9 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             }
             // Store the config for later access
             linkuraConfig = initConfig
+            webRtcSessionManager.setSignalingPort(
+                sanitizeSignalingTcpPort(initConfig?.signalingTcpPort ?: DEFAULT_SIGNALING_TCP_PORT)
+            )
             val programConfig = try {
                 if (programData == null) {
                     ProgramConfig()
@@ -986,6 +996,14 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         LogExporter.addLogEntry(TAG, "I", "Game version: $versionName ($versionCode)")
         if (clientResData != null) {
             processClientResourceData(clientResData, versionName)
+        }
+    }
+
+    private fun sanitizeSignalingTcpPort(value: Int): Int {
+        return if (value in 1..65535) {
+            value
+        } else {
+            DEFAULT_SIGNALING_TCP_PORT
         }
     }
 

@@ -12,6 +12,15 @@ import io.github.chocolzs.linkura.localify.models.ProgramConfigSerializer
 import kotlinx.serialization.SerializationException
 import java.io.File
 
+private const val DEFAULT_SIGNALING_TCP_PORT = 39200
+
+private fun sanitizeSignalingTcpPort(value: Int): Int {
+    return if (value in 1..65535) {
+        value
+    } else {
+        DEFAULT_SIGNALING_TCP_PORT
+    }
+}
 
 interface IHasConfigItems {
     var config: LinkuraConfig
@@ -85,6 +94,7 @@ fun <T> T.loadConfig() where T : Activity, T : IHasConfigItems {
         Toast.makeText(this, "配置文件异常: $e", Toast.LENGTH_SHORT).show()
         LinkuraConfig()
     }
+    config.signalingTcpPort = sanitizeSignalingTcpPort(config.signalingTcpPort)
     saveConfig()
 
     val programConfigStr = getProgramConfigContent()

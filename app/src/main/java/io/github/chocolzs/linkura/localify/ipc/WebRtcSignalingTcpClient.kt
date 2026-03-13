@@ -22,7 +22,7 @@ class WebRtcSignalingTcpClient {
     companion object {
         private const val TAG = "WebRtcSignalingTcpClient"
         private const val HOST = "10.0.2.2"
-        private const val PORT = 39200
+        private const val DEFAULT_PORT = 39200
         private const val CONNECT_TIMEOUT_MS = 2000
         private const val RECONNECT_DELAY_MS = 1000L
     }
@@ -34,6 +34,10 @@ class WebRtcSignalingTcpClient {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val isRunning = AtomicBoolean(false)
     private var connectJob: Job? = null
+    @Volatile
+    private var port: Int = DEFAULT_PORT
+    @Volatile
+    private var activeSocket: Socket? = null
 
     @Volatile
     private var writer: BufferedWriter? = null
@@ -50,6 +54,14 @@ class WebRtcSignalingTcpClient {
 
     fun setOnConnectedListener(listener: (() -> Unit)?) {
         onConnected = listener
+    }
+
+    fun setPort(newPort: Int) {
+        port = if (newPort in 1..65535) {
+            newPort
+        } else {
+            DEFAULT_PORT
+        }
     }
 
     fun start() {
@@ -69,8 +81,21 @@ class WebRtcSignalingTcpClient {
             return
         }
         writer = null
+        try {
+            activeSocket?.close()
+        } catch (_: Exception) {
+        }
+        activeSocket = null
         connectJob?.cancel()
         connectJob = null
+    }
+
+    fun restart() {
+        val wasRunning = isRunning.get()
+        stop()
+        if (wasRunning) {
+            start()
+        }
     }
 
     fun send(message: WebRtcSignalingMessage): Boolean {
@@ -90,15 +115,17 @@ class WebRtcSignalingTcpClient {
     }
 
     private suspend fun runConnectionLoop() {
+        val currentPort = port
         try {
             Socket().use { socket ->
+                activeSocket = socket
                 socket.tcpNoDelay = true
-                socket.connect(InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS)
+                socket.connect(InetSocketAddress(HOST, currentPort), CONNECT_TIMEOUT_MS)
 
                 BufferedWriter(OutputStreamWriter(socket.getOutputStream())).use { socketWriter ->
                     BufferedReader(InputStreamReader(socket.getInputStream())).use { reader ->
                         writer = socketWriter
-                        Log.d(TAG, "Connected to signaling server: $HOST:$PORT")
+                        Log.d(TAG, "Connected to signaling server: $HOST:$currentPort")
                         try {
                             onConnected?.invoke()
                         } catch (callbackError: Exception) {
@@ -121,6 +148,7 @@ class WebRtcSignalingTcpClient {
             }
         } finally {
             writer = null
+            activeSocket = null
         }
     }
 
