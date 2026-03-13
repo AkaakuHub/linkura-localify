@@ -61,6 +61,7 @@ interface ConfigListener {
     fun onArchiveStartTimeChanged(value: Int)
     fun onAvoidAccidentalTouchChanged(value: Boolean)
     fun onAssetsUrlPrefixChanged(value: String)
+    fun onEnableVrChanged(value: Boolean)
     fun onSignalingTcpPortChanged(value: String)
     fun onHideCharacterShadowChanged(value: Boolean)
     fun onHideLiveStreamSceneItemsLevel(value: Int)
@@ -410,6 +411,12 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
 
     override fun onAssetsUrlPrefixChanged(value: String) {
         config.assetsUrlPrefix = value
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onEnableVrChanged(value: Boolean) {
+        config.enableVr = value
         saveConfig()
         sendConfigUpdate(config)
     }

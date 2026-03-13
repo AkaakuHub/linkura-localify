@@ -32,6 +32,8 @@ namespace LinkuraLocal::HookCamera {
 #pragma region FreeCamera
     UnityResolve::UnityType::Camera* mainFreeCameraCache = nullptr;
     UnityResolve::UnityType::Transform* freeCameraTransformCache = nullptr;
+    UnityResolve::UnityType::Camera* stereoSourceCameraCache = nullptr;
+    UnityResolve::UnityType::Transform* stereoSourceTransformCache = nullptr;
     UnityResolve::UnityType::Transform* cacheTrans = nullptr;
     UnityResolve::UnityType::Quaternion cacheRotation{};
     UnityResolve::UnityType::Vector3 cachePosition{};
@@ -41,9 +43,19 @@ namespace LinkuraLocal::HookCamera {
     UnityResolve::UnityType::Camera* stereoRightCameraCache = nullptr;
     UnityResolve::UnityType::Transform* stereoRightTransformCache = nullptr;
     bool lastStereoRigActiveNotified = false;
+    // FesLive view type decides whether we should keep using the legacy free-camera path
+    // or follow the game's current camera directly.
+    enum class ActiveFesLiveView {
+        Unknown,
+        DynamicView,
+        ArenaView,
+        StandView,
+        SchoolIdle
+    };
+    ActiveFesLiveView activeFesLiveView = ActiveFesLiveView::Unknown;
 
     bool isStereoRequested() {
-        return L4Camera::GetNetworkStereoConfig().enabled;
+        return LinkuraLocal::Config::enableVr;
     }
 
     void notifyStereoRigState(bool active) {
@@ -52,17 +64,18 @@ namespace LinkuraLocal::HookCamera {
         }
         lastStereoRigActiveNotified = active;
         setStereoVideoStreamingEnabledFromNative(active);
-        LinkuraLocal::Log::InfoFmt("Stereo rig state changed: active=%d", active ? 1 : 0);
     }
+
+    void applyStereoProjectionMatrices();
 
     void applyStereoRects(bool enableStereo) {
         static auto Camera_klass = Il2cppUtils::GetClass("UnityEngine.CoreModule.dll", "UnityEngine", "Camera");
         static auto set_rect = Camera_klass->Get<UnityResolve::Method>("set_rect");
-        if (Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)) {
+        if (Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache)) {
             const UnityResolve::UnityType::Rect leftRect = enableStereo
                 ? UnityResolve::UnityType::Rect(0.0f, 0.0f, 0.5f, 1.0f)
                 : UnityResolve::UnityType::Rect(0.0f, 0.0f, 1.0f, 1.0f);
-            set_rect->Invoke<void>(mainFreeCameraCache, leftRect);
+            set_rect->Invoke<void>(stereoSourceCameraCache, leftRect);
         }
         if (enableStereo && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
             const UnityResolve::UnityType::Rect rightRect(0.5f, 0.0f, 0.5f, 1.0f);
@@ -83,7 +96,7 @@ namespace LinkuraLocal::HookCamera {
     }
 
     void ensureStereoRig() {
-        if (!Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)) {
+        if (!Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache)) {
             destroyStereoRightCamera();
             return;
         }
@@ -95,7 +108,7 @@ namespace LinkuraLocal::HookCamera {
         if (!Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
             static auto Object_klass = Il2cppUtils::GetClass("UnityEngine.CoreModule.dll", "UnityEngine", "Object");
             static auto instantiate = Object_klass->Get<UnityResolve::Method>("Instantiate", { "*" });
-            auto* cloned = instantiate->Invoke<void*>(reinterpret_cast<void*>(mainFreeCameraCache));
+            auto* cloned = instantiate->Invoke<void*>(reinterpret_cast<void*>(stereoSourceCameraCache));
             stereoRightCameraCache = reinterpret_cast<UnityResolve::UnityType::Camera*>(cloned);
             if (Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
                 stereoRightTransformCache = stereoRightCameraCache->GetTransform();
@@ -110,11 +123,35 @@ namespace LinkuraLocal::HookCamera {
             static auto Behaviour_klass = Il2cppUtils::GetClass("UnityEngine.CoreModule.dll", "UnityEngine", "Behaviour");
             static auto set_enabled = Behaviour_klass->Get<UnityResolve::Method>("set_enabled");
             set_enabled->Invoke<void>(stereoRightCameraCache, true);
-            stereoRightCameraCache->SetFoV(L4Camera::baseCamera.fov);
-            stereoRightCameraCache->SetDepth(mainFreeCameraCache->GetDepth() + 0.001f);
+            stereoRightCameraCache->SetFoV(stereoSourceCameraCache->GetFoV());
+            stereoRightCameraCache->SetDepth(stereoSourceCameraCache->GetDepth() + 0.001f);
             applyStereoRects(true);
             notifyStereoRigState(true);
         }
+    }
+
+    void updateStereoSourceCamera(UnityResolve::UnityType::Camera* camera) {
+        // Rebuild the right-eye clone whenever the source camera instance changes.
+        if (stereoSourceCameraCache != camera) {
+            destroyStereoRightCamera();
+        }
+        stereoSourceCameraCache = camera;
+        stereoSourceTransformCache = stereoSourceCameraCache ? stereoSourceCameraCache->GetTransform() : nullptr;
+        ensureStereoRig();
+        applyStereoProjectionMatrices();
+    }
+
+    bool shouldUseFreeCameraForActiveFesLiveView() {
+        if (!HookShare::Shareable::renderSceneIsFesLive()) {
+            return true;
+        }
+        return activeFesLiveView == ActiveFesLiveView::StandView;
+    }
+
+    bool shouldUpdateStereoSourceFromAudienceCamera() {
+        // Only DynamicView needs audience camera callbacks to track program-driven camera switches.
+        return HookShare::Shareable::renderSceneIsFesLive()
+            && activeFesLiveView == ActiveFesLiveView::DynamicView;
     }
 
     void registerMainFreeCamera(UnityResolve::UnityType::Camera* mainCamera) {
@@ -125,7 +162,7 @@ namespace LinkuraLocal::HookCamera {
         L4Camera::SetCameraMode(L4Camera::CameraMode::FREE);
         mainFreeCameraCache = mainCamera;
         if (mainFreeCameraCache) freeCameraTransformCache = mainFreeCameraCache->GetTransform();
-        ensureStereoRig();
+        updateStereoSourceCamera(mainCamera);
     }
 
     void sanitizeFreeCamera(UnityResolve::UnityType::Camera* mainCamera) {
@@ -156,49 +193,10 @@ namespace LinkuraLocal::HookCamera {
         if (cleanup) {
             mainFreeCameraCache = nullptr;
             freeCameraTransformCache = nullptr;
+            stereoSourceCameraCache = nullptr;
+            stereoSourceTransformCache = nullptr;
         }
         Log::DebugFmt("Unregister main camera");
-    }
-
-    void logStereoDisparity() {
-        if (!isStereoRequested()) {
-            return;
-        }
-        if (!Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache) || !Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
-            return;
-        }
-
-        const auto sampleWorldPoint = L4Camera::baseCamera.lookAt;
-        const auto leftScreen = mainFreeCameraCache->WorldToScreenPoint(sampleWorldPoint, UnityResolve::UnityType::Camera::Eye::Mono);
-        const auto rightScreen = stereoRightCameraCache->WorldToScreenPoint(sampleWorldPoint, UnityResolve::UnityType::Camera::Eye::Mono);
-        if (leftScreen.z <= 0.0f || rightScreen.z <= 0.0f) {
-            return;
-        }
-
-        const auto leftRect = mainFreeCameraCache->GetPixelRect();
-        const auto rightRect = stereoRightCameraCache->GetPixelRect();
-        if (leftRect.fWidth <= 1.0f || rightRect.fWidth <= 1.0f) {
-            return;
-        }
-
-        const float leftXInEye = (leftScreen.x - leftRect.fX) / leftRect.fWidth;
-        const float rightXInEye = (rightScreen.x - rightRect.fX) / rightRect.fWidth;
-        const float disparityNorm = leftXInEye - rightXInEye;
-        const float averageEyeWidthPx = (leftRect.fWidth + rightRect.fWidth) * 0.5f;
-        const float disparityPx = disparityNorm * averageEyeWidthPx;
-
-        throttle([&]() {
-            LinkuraLocal::Log::InfoFmt(
-                "Stereo disparity telemetry: sampleWorld=(%.3f,%.3f,%.3f) leftX=%.4f rightX=%.4f disparityNorm=%.5f disparityPx=%.2f",
-                sampleWorldPoint.x,
-                sampleWorldPoint.y,
-                sampleWorldPoint.z,
-                leftXInEye,
-                rightXInEye,
-                disparityNorm,
-                disparityPx
-            );
-        }, std::chrono::milliseconds(1000));
     }
 
     bool buildOffAxisProjectionMatrix(
@@ -299,7 +297,7 @@ namespace LinkuraLocal::HookCamera {
             return;
         }
         if (
-            !Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)
+            !Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache)
             || !Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)
         ) {
             return;
@@ -316,8 +314,8 @@ namespace LinkuraLocal::HookCamera {
         }
 
         const auto stereoConfig = L4Camera::GetNetworkStereoConfig();
-        const float nearClip = get_nearClipPlane->Invoke<float>(mainFreeCameraCache);
-        const float farClip = get_farClipPlane->Invoke<float>(mainFreeCameraCache);
+        const float nearClip = get_nearClipPlane->Invoke<float>(stereoSourceCameraCache);
+        const float farClip = get_farClipPlane->Invoke<float>(stereoSourceCameraCache);
 
         UnityResolve::UnityType::Matrix4x4 leftProjection{};
         UnityResolve::UnityType::Matrix4x4 rightProjection{};
@@ -343,48 +341,18 @@ namespace LinkuraLocal::HookCamera {
             return;
         }
 
-        set_projectionMatrix->Invoke<void>(mainFreeCameraCache, leftProjection);
+        set_projectionMatrix->Invoke<void>(stereoSourceCameraCache, leftProjection);
         set_projectionMatrix->Invoke<void>(stereoRightCameraCache, rightProjection);
         bool cullingMatrixApplied = false;
         if (get_worldToCameraMatrix && set_cullingMatrix) {
-            auto leftWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(mainFreeCameraCache);
+            auto leftWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(stereoSourceCameraCache);
             auto rightWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(stereoRightCameraCache);
             auto leftCulling = multiplyMatrix4x4(leftProjection, leftWorldToCamera);
             auto rightCulling = multiplyMatrix4x4(rightProjection, rightWorldToCamera);
-            set_cullingMatrix->Invoke<void>(mainFreeCameraCache, leftCulling);
+            set_cullingMatrix->Invoke<void>(stereoSourceCameraCache, leftCulling);
             set_cullingMatrix->Invoke<void>(stereoRightCameraCache, rightCulling);
             cullingMatrixApplied = true;
         }
-        throttle([&]() {
-            LinkuraLocal::Log::InfoFmt(
-                "Stereo projection telemetry: near=%.4f far=%.2f yFlip=1 culling=%d leftFov=(%.4f,%.4f,%.4f,%.4f) rightFov=(%.4f,%.4f,%.4f,%.4f) leftM=(m00=%.5f,m02=%.5f,m11=%.5f,m12=%.5f,m22=%.5f,m23=%.5f,m32=%.5f) rightM=(m00=%.5f,m02=%.5f,m11=%.5f,m12=%.5f,m22=%.5f,m23=%.5f,m32=%.5f)",
-                nearClip,
-                farClip,
-                cullingMatrixApplied ? 1 : 0,
-                stereoConfig.leftEyeAngleLeftRadians,
-                stereoConfig.leftEyeAngleRightRadians,
-                stereoConfig.leftEyeAngleUpRadians,
-                stereoConfig.leftEyeAngleDownRadians,
-                stereoConfig.rightEyeAngleLeftRadians,
-                stereoConfig.rightEyeAngleRightRadians,
-                stereoConfig.rightEyeAngleUpRadians,
-                stereoConfig.rightEyeAngleDownRadians,
-                getMatrixElement(leftProjection, 0, 0),
-                getMatrixElement(leftProjection, 0, 2),
-                getMatrixElement(leftProjection, 1, 1),
-                getMatrixElement(leftProjection, 1, 2),
-                getMatrixElement(leftProjection, 2, 2),
-                getMatrixElement(leftProjection, 2, 3),
-                getMatrixElement(leftProjection, 3, 2),
-                getMatrixElement(rightProjection, 0, 0),
-                getMatrixElement(rightProjection, 0, 2),
-                getMatrixElement(rightProjection, 1, 1),
-                getMatrixElement(rightProjection, 1, 2),
-                getMatrixElement(rightProjection, 2, 2),
-                getMatrixElement(rightProjection, 2, 3),
-                getMatrixElement(rightProjection, 3, 2)
-            );
-        }, std::chrono::milliseconds(1000));
     }
 
     // 计算从 position 看向 lookAt 的水平角和垂直角
@@ -488,6 +456,7 @@ namespace LinkuraLocal::HookCamera {
         L4Camera::clearRenderSet();
         unregisterMainFreeCamera(true);
         unregisterCurrentCamera();
+        activeFesLiveView = ActiveFesLiveView::Unknown;
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
         HookShare::Shareable::currentArchiveDuration = 0;
@@ -569,8 +538,47 @@ namespace LinkuraLocal::HookCamera {
         }
     }
 
+    void syncStereoRightEyeFromSourceTransform() {
+        if (!isStereoRequested()) {
+            return;
+        }
+        if (!Il2cppUtils::IsNativeObjectAlive(stereoSourceTransformCache) || !Il2cppUtils::IsNativeObjectAlive(stereoRightTransformCache)) {
+            return;
+        }
+
+        static auto set_rotation_injected = reinterpret_cast<void (*)(UnityResolve::UnityType::Transform*, UnityResolve::UnityType::Quaternion*)>(
+            Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Transform::set_rotation_Injected(UnityEngine.Quaternion&)"));
+        static auto set_position_injected = reinterpret_cast<void (*)(UnityResolve::UnityType::Transform*, UnityResolve::UnityType::Vector3*)>(
+            Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Transform::set_position_Injected(UnityEngine.Vector3&)"));
+
+        auto leftRotation = stereoSourceTransformCache->GetRotation();
+        set_rotation_injected(stereoRightTransformCache, &leftRotation);
+
+        const auto stereoConfig = L4Camera::GetNetworkStereoConfig();
+        const float ipdMeters = std::clamp(stereoConfig.ipdMeters, 0.0f, 0.30f);
+        auto centerPos = stereoSourceTransformCache->GetPosition();
+        auto right = stereoSourceTransformCache->GetRight();
+        if (right.Length() <= 0.0001f) {
+            right = UnityResolve::UnityType::Vector3{1.0f, 0.0f, 0.0f};
+        }
+        right = right.Normalize();
+        const auto eyeOffset = right * (ipdMeters * 0.5f);
+        auto rightEyePos = centerPos + eyeOffset;
+        set_position_injected(stereoRightTransformCache, &rightEyePos);
+        // Re-apply asymmetric projections after moving the eye cameras.
+        applyStereoProjectionMatrices();
+    }
+
+    bool shouldDriveFreeCameraStereo() {
+        return Config::enableFreeCamera
+            && !HookShare::Shareable::renderSceneIsNone()
+            && shouldUseFreeCameraForActiveFesLiveView()
+            && Il2cppUtils::IsNativeObjectAlive(freeCameraTransformCache)
+            && stereoSourceCameraCache == mainFreeCameraCache;
+    }
+
     DEFINE_HOOK(void, Unity_set_rotation_Injected, (UnityResolve::UnityType::Transform* self, UnityResolve::UnityType::Quaternion* value)) {
-        if (Config::enableFreeCamera && !HookShare::Shareable::renderSceneIsNone()) {
+        if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(freeCameraTransformCache)) {
                 ensureStereoRig();
                 static auto lookat_injected = reinterpret_cast<void (*)(void*freeCameraTransformCache,
@@ -611,11 +619,16 @@ namespace LinkuraLocal::HookCamera {
             }
             if (self == freeCameraTransformCache || self == stereoRightTransformCache) return;
         }
-        return Unity_set_rotation_Injected_Orig(self, value);
+        Unity_set_rotation_Injected_Orig(self, value);
+        if (self == stereoSourceTransformCache && self != freeCameraTransformCache) {
+            ensureStereoRig();
+            syncStereoRightEyeFromSourceTransform();
+        }
+        return;
     }
 
     DEFINE_HOOK(void, Unity_set_position_Injected, (UnityResolve::UnityType::Transform* self, UnityResolve::UnityType::Vector3* data)) {
-        if (Config::enableFreeCamera && !HookShare::Shareable::renderSceneIsNone()) {
+        if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(freeCameraTransformCache)) {
                 ensureStereoRig();
                 const auto cameraMode = L4Camera::GetCameraMode();
@@ -654,7 +667,6 @@ namespace LinkuraLocal::HookCamera {
                         Unity_set_position_Injected_Orig(freeCameraTransformCache, &leftEyePos);
                         Unity_set_position_Injected_Orig(stereoRightTransformCache, &rightEyePos);
                         applyStereoProjectionMatrices();
-                        logStereoDisparity();
                     } else {
                         Unity_set_position_Injected_Orig(freeCameraTransformCache, &centerPos);
                     }
@@ -664,10 +676,15 @@ namespace LinkuraLocal::HookCamera {
             if (self == freeCameraTransformCache || self == stereoRightTransformCache) return;
         }
         Unity_set_position_Injected_Orig(self, data);
+        if (self == stereoSourceTransformCache && self != freeCameraTransformCache) {
+            ensureStereoRig();
+            syncStereoRightEyeFromSourceTransform();
+        }
+        return;
     }
 
     DEFINE_HOOK(void, Unity_set_fieldOfView, (UnityResolve::UnityType::Camera* self, float value)) {
-        if (Config::enableFreeCamera && !HookShare::Shareable::renderSceneIsNone()) {
+        if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache) && self == mainFreeCameraCache) {
                 value = L4Camera::baseCamera.fov;
                 if (isStereoRequested()) {
@@ -678,10 +695,17 @@ namespace LinkuraLocal::HookCamera {
                 }
             }
         }
+        if (self == stereoSourceCameraCache && self != mainFreeCameraCache) {
+            ensureStereoRig();
+            if (Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
+                Unity_set_fieldOfView_Orig(stereoRightCameraCache, value);
+            }
+            applyStereoProjectionMatrices();
+        }
         Unity_set_fieldOfView_Orig(self, value);
     }
     DEFINE_HOOK(float, Unity_get_fieldOfView, (UnityResolve::UnityType::Camera* self)) {
-        if (Config::enableFreeCamera && !HookShare::Shareable::renderSceneIsNone()) {
+        if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)) {
                 for (const auto& i : UnityResolve::UnityType::Camera::GetAllCamera()) {
                     Unity_set_fieldOfView_Orig(i, L4Camera::baseCamera.fov);
@@ -695,7 +719,7 @@ namespace LinkuraLocal::HookCamera {
         return Unity_get_fieldOfView_Orig(self);
     }
     DEFINE_HOOK(void, EndCameraRendering, (void* ctx, void* camera, void* method)) {
-        if (Config::enableFreeCamera && !HookShare::Shareable::renderSceneIsNone()) {
+        if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)) {
                 ensureStereoRig();
                 // prevent crash for with live and fes live & remain the free fov for story
@@ -708,43 +732,29 @@ namespace LinkuraLocal::HookCamera {
                 }
             }
         }
+        if (
+            isStereoRequested()
+            && !shouldDriveFreeCameraStereo()
+            && Il2cppUtils::IsNativeObjectAlive(stereoSourceTransformCache)
+            && Il2cppUtils::IsNativeObjectAlive(stereoRightTransformCache)
+        ) {
+            // Fixed and target cameras do not always emit transform callbacks consistently,
+            // so keep the right eye synced once per rendered frame.
+            ensureStereoRig();
+            syncStereoRightEyeFromSourceTransform();
+        }
         const bool stereoEnabled = isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache);
-        const bool mainCameraAlive = Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache);
+        const bool mainCameraAlive = Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache);
         const bool captureTriggerEnabled = stereoEnabled && mainCameraAlive;
         const void* rightCaptureCamera = stereoEnabled
             ? reinterpret_cast<void*>(stereoRightCameraCache)
             : nullptr;
         const void* mainCaptureCamera = (stereoEnabled && mainCameraAlive)
-            ? reinterpret_cast<void*>(mainFreeCameraCache)
+            ? reinterpret_cast<void*>(stereoSourceCameraCache)
             : nullptr;
-        static uint64_t endCameraRenderingCalls = 0;
-        static uint64_t captureCameraMatchedCalls = 0;
-        static uint64_t captureRightMatchedCalls = 0;
-        static uint64_t captureMainMatchedCalls = 0;
-        endCameraRenderingCalls++;
         const bool matchedRightCamera = rightCaptureCamera != nullptr && camera == rightCaptureCamera;
         const bool matchedMainCamera = mainCaptureCamera != nullptr && camera == mainCaptureCamera;
         if (captureTriggerEnabled && (matchedRightCamera || matchedMainCamera)) {
-            captureCameraMatchedCalls++;
-            if (matchedRightCamera) {
-                captureRightMatchedCalls++;
-            }
-            if (matchedMainCamera) {
-                captureMainMatchedCalls++;
-            }
-            throttle([&]() {
-                LinkuraLocal::Log::InfoFmt(
-                    "EndCameraRendering stats: calls=%llu matched=%llu rightMatched=%llu mainMatched=%llu stereo=%d camera=%p rightCapture=%p mainCapture=%p",
-                    static_cast<unsigned long long>(endCameraRenderingCalls),
-                    static_cast<unsigned long long>(captureCameraMatchedCalls),
-                    static_cast<unsigned long long>(captureRightMatchedCalls),
-                    static_cast<unsigned long long>(captureMainMatchedCalls),
-                    stereoEnabled ? 1 : 0,
-                    camera,
-                    rightCaptureCamera,
-                    mainCaptureCamera
-                );
-            }, std::chrono::milliseconds(2000));
             EndCameraRendering_Orig(ctx, camera, method);
             LinkuraLocal::StereoVideo::OnEndCameraRendering();
             return;
@@ -769,27 +779,21 @@ namespace LinkuraLocal::HookCamera {
         bool patched = false;
         if (
             isStereoRequested()
-            && Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)
+            && Il2cppUtils::IsNativeObjectAlive(camera)
+            && shouldUpdateStereoSourceFromAudienceCamera()
+        ) {
+            updateStereoSourceCamera(camera);
+        }
+        if (
+            isStereoRequested()
+            && Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache)
             && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)
-            && camera == mainFreeCameraCache
+            && camera == stereoSourceCameraCache
             && subCamera != stereoRightCameraCache
         ) {
             patchedSubCamera = stereoRightCameraCache;
             patched = true;
         }
-
-        throttle([&]() {
-            Log::InfoFmt(
-                "AudienceSetCameraHook: patched=%d self=%p camera=%p sub=%p patchedSub=%p left=%p right=%p",
-                patched ? 1 : 0,
-                self,
-                camera,
-                subCamera,
-                patchedSubCamera,
-                mainFreeCameraCache,
-                stereoRightCameraCache
-            );
-        }, std::chrono::milliseconds(1200));
 
         return AudienceRenderingAreaManager_SetCamera_Orig(self, camera, patchedSubCamera, method);
     }
@@ -961,21 +965,33 @@ namespace LinkuraLocal::HookCamera {
         if (!initialCameraRendered) {
             sanitizeFreeCamera(camera);
         }
-        registerMainFreeCamera(camera);
+        if (activeFesLiveView == ActiveFesLiveView::StandView) {
+            // StandView is the only FesLive mode that should keep the legacy free-camera behavior.
+            registerMainFreeCamera(camera);
+        } else {
+            if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
+                // Leaving StandView must stop forcing FREE mode for other FesLive camera types.
+                L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
+            }
+            updateStereoSourceCamera(camera);
+        }
         registerCurrentCamera(camera);
         return camera;
     }
 
     DEFINE_HOOK(UnityResolve::UnityType::Camera*, DynamicCamera_GetCamera, (Il2cppUtils::Il2CppObject* self, void* method)) {
-        Log::DebugFmt("DynamicCamera_GetCamera HOOKED");
         auto camera = DynamicCamera_GetCamera_Orig(self, method);
+        updateStereoSourceCamera(camera);
         registerCurrentCamera(camera);
         return camera;
     }
 
     DEFINE_HOOK(UnityResolve::UnityType::Camera*, IdolTargetingCamera_GetCamera, (Il2cppUtils::Il2CppObject* self, void* method)) {
-        Log::DebugFmt("IdolTargetingCamera_GetCamera HOOKED");
         auto camera = IdolTargetingCamera_GetCamera_Orig(self, method);
+        if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
+            L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
+        }
+        updateStereoSourceCamera(camera);
         registerCurrentCamera(camera);
         return camera;
     }
@@ -988,35 +1004,34 @@ namespace LinkuraLocal::HookCamera {
     };
 
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {
-        static auto FesLiveCameraSwitcher_klass = Il2cppUtils::GetClass("Assembly-CSharp.dll", "School.LiveMain", "FesLiveCameraSwitcher");
-        static auto currentCamera_field = FesLiveCameraSwitcher_klass->Get<UnityResolve::Field>("currentCamera");
-        static auto FesLiveFixedCamera_klass = Il2cppUtils::GetClass("Assembly-CSharp.dll", "School.LiveMain", "FesLiveFixedCamera");
-        static auto FesLiveFixedCamera_camera_field = FesLiveFixedCamera_klass->Get<UnityResolve::Field>("camera");
-        static auto IdolTargetingCamera_klass = Il2cppUtils::GetClass("Assembly-CSharp.dll", "School.LiveMain", "IdolTargetingCamera");
-        static auto IdolTargetingCamera_camera_field = IdolTargetingCamera_klass->Get<UnityResolve::Field>("camera");
-
-        Log::DebugFmt("FesLiveCameraSwitcher_SwitchCamera HOOKED, %d", enableCameraType);
+        // Update the active view before the original method runs, because GetCamera hooks can fire inside it.
+        switch (enableCameraType) {
+            case LiveCameraType::LiveCameraTypeDynamicView:
+                activeFesLiveView = ActiveFesLiveView::DynamicView;
+                if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
+                    L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
+                }
+                break;
+            case LiveCameraType::LiveCameraTypeArenaView:
+                activeFesLiveView = ActiveFesLiveView::ArenaView;
+                if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
+                    L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
+                }
+                break;
+            case LiveCameraType::LiveCameraTypeStandView:
+                activeFesLiveView = ActiveFesLiveView::StandView;
+                break;
+            case LiveCameraType::LiveCameraTypeSchoolIdle:
+                activeFesLiveView = ActiveFesLiveView::SchoolIdle;
+                if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
+                    L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
+                }
+                break;
+            default:
+                activeFesLiveView = ActiveFesLiveView::Unknown;
+                break;
+        }
         FesLiveCameraSwitcher_SwitchCamera_Orig(self, enableCameraType, method);
-        auto currentCamera = Il2cppUtils::ClassGetFieldValue<void*>(self, currentCamera_field);
-        if (!currentCamera) return;
-        if (enableCameraType == LiveCameraType::LiveCameraTypeArenaView || enableCameraType == LiveCameraType::LiveCameraTypeStandView) {
-            auto camera = Il2cppUtils::ClassGetFieldValue<UnityResolve::UnityType::Camera*>(currentCamera, FesLiveFixedCamera_camera_field);
-            if (!initialCameraRendered) {
-                sanitizeFreeCamera(camera);
-            }
-            registerMainFreeCamera(camera);
-            registerCurrentCamera(camera);
-        }
-//        if (enableCameraType == LiveCameraType::LiveCameraTypeDynamicView) {
-//            static auto DynamicCamera_klass = Il2cppUtils::GetClass("Assembly-CSharp.dll", "School.LiveMain", "DynamicCamera");
-//            static auto DynamicCamera_camera_field = DynamicCamera_klass->Get<UnityResolve::Field>("camera");
-//            auto camera = Il2cppUtils::ClassGetFieldValue<UnityResolve::UnityType::Camera*>(currentCamera, DynamicCamera_camera_field);
-//            registerCurrentCamera(camera);
-//        }
-        if (enableCameraType == LiveCameraType::LiveCameraTypeSchoolIdle) {
-            auto camera = Il2cppUtils::ClassGetFieldValue<UnityResolve::UnityType::Camera*>(currentCamera, IdolTargetingCamera_camera_field);
-            registerCurrentCamera(camera);
-        }
     }
 
 

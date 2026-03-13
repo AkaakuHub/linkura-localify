@@ -1106,7 +1106,6 @@ namespace L4Camera {
     NetworkStereoConfig GetNetworkStereoConfig() {
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
         NetworkStereoConfig config{};
-        config.enabled = true;
         config.ipdMeters = networkCameraInputState.ipdMeters;
         config.leftEyeAngleLeftRadians = networkCameraInputState.leftEyeAngleLeftRadians;
         config.leftEyeAngleRightRadians = networkCameraInputState.leftEyeAngleRightRadians;

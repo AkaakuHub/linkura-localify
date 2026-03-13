@@ -50,6 +50,7 @@ namespace LinkuraLocal::Config {
     extern bool enableSetArchiveStartTime;
     extern int archiveStartTime;
     extern std::string assetsUrlPrefix;
+    extern bool enableVr;
     extern bool hideCharacterShadow;
     extern int hideLiveStreamSceneItemsLevel;
     extern bool hideLiveStreamCharacterItems;

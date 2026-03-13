@@ -296,7 +296,6 @@ namespace L4Camera {
     void clearRenderSet();
 
     struct NetworkStereoConfig {
-        bool enabled = false;
         float ipdMeters = 0.064f;
         float leftEyeAngleLeftRadians = -0.7853982f;
         float leftEyeAngleRightRadians = 0.7853982f;

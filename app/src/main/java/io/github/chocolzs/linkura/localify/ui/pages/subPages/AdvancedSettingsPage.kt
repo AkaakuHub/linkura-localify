@@ -473,32 +473,42 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
                     collapsedHeight = 0.dp,
                     showExpand = false
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        GakuTextInput(
-                            value = signalingTcpPortText,
-                            onValueChange = { value ->
-                                signalingTcpPortText = value
-                            },
-                            modifier = Modifier.width(320.dp),
-                            label = {
-                                Text(text = "WebRTC signaling TCP port")
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                        )
-                        GakuButton(
-                            onClick = {
-                                context?.onSignalingTcpPortChanged(signalingTcpPortText)
-                            },
-                            text = "Save",
-                            modifier = Modifier
-                                .width(120.dp)
-                                .height(56.dp)
-                                .padding(bottom = 4.dp)
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        GakuSwitch(
+                            modifier,
+                            "Enable VR",
+                            checked = config.value.enableVr
+                        ) { value ->
+                            context?.onEnableVrChanged(value)
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GakuTextInput(
+                                value = signalingTcpPortText,
+                                onValueChange = { value ->
+                                    signalingTcpPortText = value
+                                },
+                                modifier = Modifier.width(320.dp),
+                                label = {
+                                    Text(text = "WebRTC signaling TCP port")
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            GakuButton(
+                                onClick = {
+                                    context?.onSignalingTcpPortChanged(signalingTcpPortText)
+                                },
+                                text = "Save",
+                                modifier = Modifier
+                                    .width(120.dp)
+                                    .height(56.dp)
+                                    .padding(bottom = 4.dp)
+                            )
+                        }
                     }
                 }
             }

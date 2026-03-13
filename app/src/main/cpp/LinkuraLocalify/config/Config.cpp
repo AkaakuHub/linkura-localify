@@ -55,6 +55,7 @@ namespace LinkuraLocal::Config {
     bool filterPlayableMotionCapture = false;
     bool avoidAccidentalTouch = true;
     std::string assetsUrlPrefix;
+    bool enableVr = true;
     bool hideCharacterShadow = false;
     int hideLiveStreamSceneItemsLevel = 0;
     bool hideLiveStreamCharacterItems = false;
@@ -126,6 +127,7 @@ namespace LinkuraLocal::Config {
             GetConfigItem(archiveStartTime);
             GetConfigItem(avoidAccidentalTouch);
             GetConfigItem(assetsUrlPrefix);
+            GetConfigItem(enableVr);
             GetConfigItem(hideCharacterShadow);
             GetConfigItem(hideLiveStreamSceneItemsLevel);
             GetConfigItem(hideLiveStreamCharacterItems);
@@ -215,6 +217,7 @@ namespace LinkuraLocal::Config {
                 if (configUpdate.has_archive_start_time()) archiveStartTime = configUpdate.archive_start_time();
                 if (configUpdate.has_avoid_accidental_touch()) avoidAccidentalTouch = configUpdate.avoid_accidental_touch();
                 if (configUpdate.has_assets_url_prefix()) assetsUrlPrefix = configUpdate.assets_url_prefix();
+                if (configUpdate.has_enable_vr()) enableVr = configUpdate.enable_vr();
                 if (configUpdate.has_signaling_tcp_port()) signalingTcpPort = configUpdate.signaling_tcp_port();
                 if (configUpdate.has_hide_character_shadow()) hideCharacterShadow = configUpdate.hide_character_shadow();
                 if (configUpdate.has_hide_live_stream_scene_items_level()) hideLiveStreamSceneItemsLevel = configUpdate.hide_live_stream_scene_items_level();
