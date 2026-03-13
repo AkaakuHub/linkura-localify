@@ -244,11 +244,11 @@ namespace LinkuraLocal::StereoVideo {
             }
             g_state.targetWidth = width;
             g_state.targetHeight = height;
-            __android_log_print(ANDROID_LOG_INFO, kLogTag, "Encoder surface set: %dx%d", width, height);
+            __android_log_print(ANDROID_LOG_DEBUG, kLogTag, "Encoder surface set: %dx%d", width, height);
         } else {
             g_state.targetWidth = 0;
             g_state.targetHeight = 0;
-            __android_log_print(ANDROID_LOG_INFO, kLogTag, "Encoder surface cleared");
+            __android_log_print(ANDROID_LOG_DEBUG, kLogTag, "Encoder surface cleared");
         }
 
         g_state.surfaceDirty = true;
@@ -260,48 +260,12 @@ namespace LinkuraLocal::StereoVideo {
     }
 
     void OnEglSwapBuffers(EGLDisplay hookedDisplay, EGLSurface hookedSurface) {
-        static uint64_t totalCalls = 0;
-        static uint64_t submittedFrames = 0;
-        static uint64_t skippedNoContext = 0;
-        static uint64_t skippedNoTarget = 0;
-        static uint64_t skippedNoFrame = 0;
-        static uint64_t skippedRecreateFail = 0;
-        static uint64_t skippedNoResources = 0;
-        static uint64_t skippedBadSurfaceSize = 0;
-        static uint64_t skippedMakeCurrentFail = 0;
-        static auto lastStatsLogAt = std::chrono::steady_clock::now();
-        totalCalls++;
-
-        auto logPeriodic = [&]() {
-            const auto now = std::chrono::steady_clock::now();
-            const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatsLogAt).count();
-            if (elapsedMs >= 2000) {
-                __android_log_print(
-                    ANDROID_LOG_INFO,
-                    kLogTag,
-                    "Bridge counters: calls=%llu submitted=%llu noContext=%llu noTarget=%llu noFrame=%llu recreateFail=%llu noResources=%llu badSurface=%llu makeCurrentFail=%llu",
-                    static_cast<unsigned long long>(totalCalls),
-                    static_cast<unsigned long long>(submittedFrames),
-                    static_cast<unsigned long long>(skippedNoContext),
-                    static_cast<unsigned long long>(skippedNoTarget),
-                    static_cast<unsigned long long>(skippedNoFrame),
-                    static_cast<unsigned long long>(skippedRecreateFail),
-                    static_cast<unsigned long long>(skippedNoResources),
-                    static_cast<unsigned long long>(skippedBadSurfaceSize),
-                    static_cast<unsigned long long>(skippedMakeCurrentFail)
-                );
-                lastStatsLogAt = now;
-            }
-        };
-
         EGLDisplay display = eglGetCurrentDisplay();
         EGLContext context = eglGetCurrentContext();
         EGLSurface drawSurface = eglGetCurrentSurface(EGL_DRAW);
         EGLSurface readSurface = eglGetCurrentSurface(EGL_READ);
 
         if (display == EGL_NO_DISPLAY || context == EGL_NO_CONTEXT || drawSurface == EGL_NO_SURFACE || readSurface == EGL_NO_SURFACE) {
-            skippedNoContext++;
-            logPeriodic();
             return;
         }
 
@@ -322,15 +286,11 @@ namespace LinkuraLocal::StereoVideo {
         }
 
         if (g_state.window == nullptr || g_state.targetWidth <= 0 || g_state.targetHeight <= 0) {
-            skippedNoTarget++;
-            logPeriodic();
             return;
         }
 
         const bool captureReady = g_captureFrameReady.exchange(false, std::memory_order_acq_rel);
         if (!captureReady) {
-            skippedNoFrame++;
-            logPeriodic();
             return;
         }
 
@@ -338,15 +298,11 @@ namespace LinkuraLocal::StereoVideo {
         if (g_state.surfaceDirty || contextChanged || g_state.eglSurface == EGL_NO_SURFACE) {
             destroyGlResourcesLocked();
             if (!recreateEncoderSurfaceLocked(display, drawSurface, context)) {
-                skippedRecreateFail++;
-                logPeriodic();
                 return;
             }
         }
 
         if (!ensureGlResourcesLocked()) {
-            skippedNoResources++;
-            logPeriodic();
             return;
         }
 
@@ -355,8 +311,6 @@ namespace LinkuraLocal::StereoVideo {
         if (eglQuerySurface(display, drawSurface, EGL_WIDTH, &drawWidth) != EGL_TRUE ||
             eglQuerySurface(display, drawSurface, EGL_HEIGHT, &drawHeight) != EGL_TRUE ||
             drawWidth <= 0 || drawHeight <= 0) {
-            skippedBadSurfaceSize++;
-            logPeriodic();
             return;
         }
 
@@ -395,10 +349,8 @@ namespace LinkuraLocal::StereoVideo {
 
         if (eglMakeCurrent(display, g_state.eglSurface, g_state.eglSurface, context) != EGL_TRUE) {
             logError("eglMakeCurrent to encoder surface failed");
-            skippedMakeCurrentFail++;
             g_captureFrameReady.store(true, std::memory_order_release);
             restoreGlState();
-            logPeriodic();
             return;
         }
 
@@ -419,8 +371,6 @@ namespace LinkuraLocal::StereoVideo {
         }
 
         eglSwapBuffers(display, g_state.eglSurface);
-        submittedFrames++;
-        logPeriodic();
 
         const EGLBoolean restoreResult = eglMakeCurrent(display, drawSurface, readSurface, context);
         if (restoreResult != EGL_TRUE) {

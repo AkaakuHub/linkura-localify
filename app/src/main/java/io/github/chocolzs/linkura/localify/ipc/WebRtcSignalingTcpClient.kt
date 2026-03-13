@@ -98,7 +98,7 @@ class WebRtcSignalingTcpClient {
                 BufferedWriter(OutputStreamWriter(socket.getOutputStream())).use { socketWriter ->
                     BufferedReader(InputStreamReader(socket.getInputStream())).use { reader ->
                         writer = socketWriter
-                        Log.i(TAG, "Connected to signaling server: $HOST:$PORT")
+                        Log.d(TAG, "Connected to signaling server: $HOST:$PORT")
                         try {
                             onConnected?.invoke()
                         } catch (callbackError: Exception) {

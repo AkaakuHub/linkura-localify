@@ -46,19 +46,13 @@ class BridgeSurfaceVideoCapturer(
         captureSurface = Surface(helper.surfaceTexture)
         helper.startListening { frame: VideoFrame ->
             capturedFrameCount += 1
-            if (capturedFrameCount <= 3L || capturedFrameCount % 120L == 0L) {
-                Log.i(
-                    TAG,
-                    "onFrameCaptured count=$capturedFrameCount size=${frame.rotatedWidth}x${frame.rotatedHeight} tsNs=${frame.timestampNs}"
-                )
-            }
             activeObserver.onFrameCaptured(frame)
         }
         activeObserver.onCapturerStarted(true)
         started = true
         capturedFrameCount = 0
         onSurfaceChanged(captureSurface, width, height)
-        Log.i(TAG, "startCapture ${width}x${height}@${framerate}")
+        Log.d(TAG, "startCapture ${width}x${height}@${framerate}")
     }
 
     override fun stopCapture() {
@@ -80,7 +74,7 @@ class BridgeSurfaceVideoCapturer(
         }
         captureSurface = null
         observer?.onCapturerStopped()
-        Log.i(TAG, "stopCapture capturedFrameCount=$capturedFrameCount")
+        Log.d(TAG, "stopCapture capturedFrameCount=$capturedFrameCount")
     }
 
     override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {

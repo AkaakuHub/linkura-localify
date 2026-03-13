@@ -63,7 +63,6 @@ class WebRtcSessionManager private constructor() {
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
     private var appContext: Context? = null
-    private var statsExecutor: ScheduledExecutorService? = null
     private var inputWatchdogExecutor: ScheduledExecutorService? = null
     private var inputDataChannel: DataChannel? = null
     private var lastInputPacketAtMs: Long = 0L
@@ -86,7 +85,7 @@ class WebRtcSessionManager private constructor() {
         }
         signalingClient.setOnConnectedListener {
             try {
-                Log.i(TAG, "Signaling connected callback: rebuilding peer connection and creating fresh offer")
+                Log.d(TAG, "Signaling connected callback: rebuilding peer connection and creating fresh offer")
                 rebuildPeerConnectionForReconnect()
                 createOffer()
             } catch (e: Exception) {
@@ -94,7 +93,6 @@ class WebRtcSessionManager private constructor() {
             }
         }
         signalingClient.start()
-        startStatsLogging()
         startInputWatchdog()
     }
 
@@ -114,7 +112,6 @@ class WebRtcSessionManager private constructor() {
         }
         factoryEglBase = null
         appContext = null
-        stopStatsLogging()
         stopInputWatchdog()
         applyZeroInput()
         try {
@@ -139,7 +136,7 @@ class WebRtcSessionManager private constructor() {
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
-        Log.i(TAG, "PeerConnectionFactory initialized")
+        Log.d(TAG, "PeerConnectionFactory initialized")
     }
 
     private fun buildPeerConnection() {
@@ -154,22 +151,22 @@ class WebRtcSessionManager private constructor() {
         val config = PeerConnection.RTCConfiguration(listOf(iceServer))
         peerConnection = activeFactory.createPeerConnection(config, object : PeerConnection.Observer {
             override fun onSignalingChange(newState: PeerConnection.SignalingState) {
-                Log.i(TAG, "Signaling state: $newState")
+                Log.d(TAG, "Signaling state: $newState")
             }
 
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
-                Log.i(TAG, "ICE connection state: $newState")
+                Log.d(TAG, "ICE connection state: $newState")
             }
 
             override fun onIceConnectionReceivingChange(receiving: Boolean) {
             }
 
             override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {
-                Log.i(TAG, "ICE gathering state: $newState")
+                Log.d(TAG, "ICE gathering state: $newState")
             }
 
             override fun onIceCandidate(candidate: IceCandidate) {
-                Log.i(
+                Log.d(
                     TAG,
                     "Local ICE candidate: mid=${candidate.sdpMid} mline=${candidate.sdpMLineIndex} candidate=${candidate.sdp}"
                 )
@@ -193,7 +190,7 @@ class WebRtcSessionManager private constructor() {
             }
 
             override fun onDataChannel(channel: DataChannel) {
-                Log.i(TAG, "Remote data channel opened: ${channel.label()}")
+                Log.d(TAG, "Remote data channel opened: ${channel.label()}")
                 if (channel.label() == INPUT_DATA_CHANNEL_LABEL) {
                     attachInputDataChannel(channel)
                 }
@@ -259,7 +256,7 @@ class WebRtcSessionManager private constructor() {
 
             override fun onStateChange() {
                 val state = channel.state()
-                Log.i(TAG, "Input data channel state: label=${channel.label()} state=$state")
+                Log.d(TAG, "Input data channel state: label=${channel.label()} state=$state")
                 if (state == DataChannel.State.OPEN) {
                     lastInputPacketAtMs = System.currentTimeMillis()
                 } else if (state == DataChannel.State.CLOSING || state == DataChannel.State.CLOSED) {
@@ -505,7 +502,7 @@ class WebRtcSessionManager private constructor() {
         activePeerConnection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(description: SessionDescription) {
                 val tunedSdp = tuneVp8OfferSdp(description.description)
-                Log.i(TAG, "Offer SDP summary: ${summarizeSdp(tunedSdp)}")
+                Log.d(TAG, "Offer SDP summary: ${summarizeSdp(tunedSdp)}")
                 val tunedDescription = SessionDescription(description.type, tunedSdp)
                 activePeerConnection.setLocalDescription(
                     LoggingSdpObserver("setLocalDescription(offer)"),
@@ -538,7 +535,7 @@ class WebRtcSessionManager private constructor() {
         when (message.type) {
             "answer" -> {
                 val answerSdp = message.sdp ?: return
-                Log.i(TAG, "Answer SDP summary: ${summarizeSdp(answerSdp)}")
+                Log.d(TAG, "Answer SDP summary: ${summarizeSdp(answerSdp)}")
                 val remoteDescription = SessionDescription(SessionDescription.Type.ANSWER, answerSdp)
                 activePeerConnection.setRemoteDescription(
                     LoggingSdpObserver("setRemoteDescription(answer)"),
@@ -555,7 +552,7 @@ class WebRtcSessionManager private constructor() {
                     return
                 }
                 val rewrittenSdp = rewriteLoopbackCandidateForEmulator(sdp)
-                Log.i(TAG, "Remote ICE candidate added: mid=$mid mline=$index candidate=$rewrittenSdp")
+                Log.d(TAG, "Remote ICE candidate added: mid=$mid mline=$index candidate=$rewrittenSdp")
                 activePeerConnection.addIceCandidate(IceCandidate(mid, index, rewrittenSdp))
             }
         }
@@ -600,59 +597,6 @@ class WebRtcSessionManager private constructor() {
         return "len=${sdp.length}; bundle=$bundle; m=$mLines; rtpmap=$rtpMaps"
     }
 
-    private fun startStatsLogging() {
-        stopStatsLogging()
-        val activePeerConnection = peerConnection ?: return
-        statsExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-            Thread(runnable, "WebRtcStats").apply { isDaemon = true }
-        }.also { executor ->
-            executor.scheduleAtFixedRate(
-                {
-                    try {
-                        activePeerConnection.getStats { report ->
-                            logOutboundVideoStats(report.statsMap.values)
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Stats polling failed: ${e.message}")
-                    }
-                },
-                2,
-                2,
-                TimeUnit.SECONDS
-            )
-        }
-    }
-
-    private fun stopStatsLogging() {
-        val executor = statsExecutor ?: return
-        executor.shutdownNow()
-        statsExecutor = null
-    }
-
-    private fun logOutboundVideoStats(stats: Collection<org.webrtc.RTCStats>) {
-        val outboundVideo = stats.firstOrNull { stat ->
-            stat.type == "outbound-rtp"
-                && (
-                    stat.members["kind"] == "video"
-                        || stat.members["mediaType"] == "video"
-                    )
-        } ?: return
-
-        val bytesSent = outboundVideo.members["bytesSent"] ?: "n/a"
-        val packetsSent = outboundVideo.members["packetsSent"] ?: "n/a"
-        val framesEncoded = outboundVideo.members["framesEncoded"] ?: "n/a"
-        val framesSent = outboundVideo.members["framesSent"] ?: "n/a"
-        val qpSum = outboundVideo.members["qpSum"] ?: "n/a"
-        val qualityLimitationReason = outboundVideo.members["qualityLimitationReason"] ?: "n/a"
-        val qualityLimitationDurations = outboundVideo.members["qualityLimitationDurations"] ?: "n/a"
-        val targetBitrate = outboundVideo.members["targetBitrate"] ?: "n/a"
-        val encoderImplementation = outboundVideo.members["encoderImplementation"] ?: "n/a"
-        Log.i(
-            TAG,
-            "Outbound video stats: bytesSent=$bytesSent packetsSent=$packetsSent framesEncoded=$framesEncoded framesSent=$framesSent qpSum=$qpSum targetBitrate=$targetBitrate qualityReason=$qualityLimitationReason qualityDurations=$qualityLimitationDurations encoder=$encoderImplementation"
-        )
-    }
-
     private fun applyVideoSenderParameters(sender: org.webrtc.RtpSender) {
         try {
             val parameters = sender.parameters ?: return
@@ -670,7 +614,7 @@ class WebRtcSessionManager private constructor() {
                 Log.w(TAG, "Failed to apply sender bitrate parameters")
                 return
             }
-            Log.i(
+            Log.d(
                 TAG,
                 "Applied sender bitrate parameters: min=${VP8_MIN_BITRATE_KBPS}kbps start=${VP8_START_BITRATE_KBPS}kbps max=${VP8_MAX_BITRATE_KBPS}kbps maxFps=$VP8_MAX_FRAMERATE"
             )
@@ -737,7 +681,7 @@ class WebRtcSessionManager private constructor() {
         val capabilities = activeFactory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO)
         val codecs: List<RtpCapabilities.CodecCapability> = capabilities.codecs ?: emptyList()
         val codecNames = codecs.joinToString(",") { codec -> "${codec.name}/${codec.kind}" }
-        Log.i(TAG, "Sender video codec capabilities: $codecNames")
+        Log.d(TAG, "Sender video codec capabilities: $codecNames")
 
         val vp8FamilyCodecs = codecs.filter { codec ->
             codec.kind == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
@@ -760,8 +704,8 @@ class WebRtcSessionManager private constructor() {
             throw IllegalStateException("Video transceiver not found. VP8 fixed mode cannot start.")
         }
         transceiver.setCodecPreferences(orderedCodecs)
-        Log.i(TAG, "Video transceiver direction: ${transceiver.direction}")
-        Log.i(TAG, "Applied codec preference: VP8 family only (${orderedCodecs.size} entries)")
+        Log.d(TAG, "Video transceiver direction: ${transceiver.direction}")
+        Log.d(TAG, "Applied codec preference: VP8 family only (${orderedCodecs.size} entries)")
     }
 
     private class LoggingSdpObserver(private val action: String) : SdpObserver {
@@ -769,7 +713,7 @@ class WebRtcSessionManager private constructor() {
         }
 
         override fun onSetSuccess() {
-            Log.i(TAG, "$action success")
+            Log.d(TAG, "$action success")
         }
 
         override fun onCreateFailure(error: String) {
