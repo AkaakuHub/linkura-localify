@@ -342,3 +342,11 @@ namespace L4Camera {
     // 在切换到 FREE 模式前调用，使 FreeCamera 继承当前相机状态
     void SyncBaseCameraFromCurrentMode();
 }
+
+namespace LinkuraLocal::HookCamera {
+    // These helpers expose the Unity-thread camera switching path to the input thread.
+    bool CanHandleFesLiveViewSwitchInput();
+    bool CanHandleSchoolIdleTargetSwitchInput();
+    bool RequestNextFesLiveViewSwitch();
+    bool RequestNextSchoolIdleTargetSwitch();
+}

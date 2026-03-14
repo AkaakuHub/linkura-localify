@@ -9,6 +9,8 @@
 #include "thread"
 #include "chrono"
 #include "vector"
+#include <atomic>
+#include <optional>
 #include <algorithm>
 #include <cmath>
 #include <re2/re2.h>
@@ -53,6 +55,11 @@ namespace LinkuraLocal::HookCamera {
         SchoolIdle
     };
     ActiveFesLiveView activeFesLiveView = ActiveFesLiveView::Unknown;
+    // Cache the Unity objects we need so controller input can schedule the same camera operations later on the render thread.
+    Il2cppUtils::Il2CppObject* fesLiveCameraSwitcherCache = nullptr;
+    Il2cppUtils::Il2CppObject* idolTargetingCameraCache = nullptr;
+    std::atomic<int32_t> pendingLiveCameraTypeRequest(-1);
+    std::atomic<bool> pendingSchoolIdleTargetSwitchRequest(false);
 
     bool isStereoRequested() {
         return LinkuraLocal::Config::enableVr;
@@ -457,6 +464,10 @@ namespace LinkuraLocal::HookCamera {
         unregisterMainFreeCamera(true);
         unregisterCurrentCamera();
         activeFesLiveView = ActiveFesLiveView::Unknown;
+        fesLiveCameraSwitcherCache = nullptr;
+        idolTargetingCameraCache = nullptr;
+        pendingLiveCameraTypeRequest.store(-1);
+        pendingSchoolIdleTargetSwitchRequest.store(false);
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
         HookShare::Shareable::currentArchiveDuration = 0;
@@ -719,6 +730,95 @@ namespace LinkuraLocal::HookCamera {
         return Unity_get_fieldOfView_Orig(self);
     }
     DEFINE_HOOK(void, EndCameraRendering, (void* ctx, void* camera, void* method)) {
+        // Run queued controller requests here so Unity camera state changes happen on the render thread.
+        const int32_t pendingLiveCameraType = pendingLiveCameraTypeRequest.exchange(-1);
+        if (pendingLiveCameraType >= 0 && HookShare::Shareable::renderSceneIsFesLive() && fesLiveCameraSwitcherCache) {
+            static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
+                "Assembly-CSharp.dll",
+                "School.LiveMain",
+                "FesLiveCameraSwitcher"
+            );
+            static auto switchCameraMethod = fesLiveCameraSwitcherClass
+                ? fesLiveCameraSwitcherClass->Get<UnityResolve::Method>("SwitchCamera")
+                : nullptr;
+            if (switchCameraMethod) {
+                switchCameraMethod->Invoke<void>(
+                    fesLiveCameraSwitcherCache,
+                    pendingLiveCameraType
+                );
+            }
+        }
+        if (
+            pendingSchoolIdleTargetSwitchRequest.exchange(false)
+            && HookShare::Shareable::renderSceneIsFesLive()
+            && activeFesLiveView == ActiveFesLiveView::SchoolIdle
+            && idolTargetingCameraCache
+        ) {
+            static auto idolTargetingCameraClass = Il2cppUtils::GetClassIl2cpp(
+                "Assembly-CSharp.dll",
+                "School.LiveMain",
+                "IdolTargetingCamera"
+            );
+            static auto targetCharacterIdField = idolTargetingCameraClass
+                ? Il2cppUtils::il2cpp_class_get_field_from_name(idolTargetingCameraClass, "targetCharacterId")
+                : nullptr;
+            static auto setTargetIdolMethod = idolTargetingCameraClass
+                ? Il2cppUtils::GetMethodIl2cpp(idolTargetingCameraClass, "SetTargetIdol", 1)
+                : nullptr;
+
+            if (targetCharacterIdField && setTargetIdolMethod) {
+                const int32_t currentTargetCharacterId = Il2cppUtils::ClassGetFieldValue<int32_t>(
+                    idolTargetingCameraCache,
+                    targetCharacterIdField
+                );
+
+                static auto cameraClass = UnityResolve::Get("UnityEngine.CoreModule.dll")->Get("Camera");
+                std::vector<int32_t> candidateTargetCharacterIds;
+                if (cameraClass) {
+                    for (auto* foundCamera : cameraClass->FindObjectsByType<UnityResolve::UnityType::Camera*>()) {
+                        if (!Il2cppUtils::IsNativeObjectAlive(foundCamera)) {
+                            continue;
+                        }
+                        const std::string cameraName = foundCamera->GetName();
+                        int32_t characterId = 0;
+                        if (!RE2::FullMatch(cameraName, "LookAtCamera([0-9]{4})[0-9]{2}", &characterId)) {
+                            continue;
+                        }
+                        candidateTargetCharacterIds.push_back(characterId);
+                    }
+                }
+
+                // Derive valid SchoolIdle target ids from the live LookAtCamera objects instead of hardcoding idol ids.
+                std::sort(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end());
+                candidateTargetCharacterIds.erase(
+                    std::unique(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end()),
+                    candidateTargetCharacterIds.end()
+                );
+
+                if (!candidateTargetCharacterIds.empty()) {
+                    auto currentTargetIt = std::lower_bound(
+                        candidateTargetCharacterIds.begin(),
+                        candidateTargetCharacterIds.end(),
+                        currentTargetCharacterId
+                    );
+                    int32_t nextTargetCharacterId = candidateTargetCharacterIds.front();
+                    if (
+                        currentTargetIt != candidateTargetCharacterIds.end()
+                        && *currentTargetIt == currentTargetCharacterId
+                    ) {
+                        ++currentTargetIt;
+                        if (currentTargetIt != candidateTargetCharacterIds.end()) {
+                            nextTargetCharacterId = *currentTargetIt;
+                        }
+                    }
+                    setTargetIdolMethod->methodPointer
+                        ? reinterpret_cast<void (*)(Il2cppUtils::Il2CppObject*, int32_t)>(
+                            setTargetIdolMethod->methodPointer
+                        )(idolTargetingCameraCache, nextTargetCharacterId)
+                        : static_cast<void>(0);
+                }
+            }
+        }
         if (shouldDriveFreeCameraStereo()) {
             if (Il2cppUtils::IsNativeObjectAlive(mainFreeCameraCache)) {
                 ensureStereoRig();
@@ -987,6 +1087,7 @@ namespace LinkuraLocal::HookCamera {
     }
 
     DEFINE_HOOK(UnityResolve::UnityType::Camera*, IdolTargetingCamera_GetCamera, (Il2cppUtils::Il2CppObject* self, void* method)) {
+        idolTargetingCameraCache = self;
         auto camera = IdolTargetingCamera_GetCamera_Orig(self, method);
         if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
             L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
@@ -1003,7 +1104,67 @@ namespace LinkuraLocal::HookCamera {
         LiveCameraTypeSchoolIdle
     };
 
+    LiveCameraType getNextLiveCameraType(LiveCameraType currentView) {
+        switch (currentView) {
+            case LiveCameraTypeDynamicView:
+                return LiveCameraTypeArenaView;
+            case LiveCameraTypeArenaView:
+                return LiveCameraTypeStandView;
+            case LiveCameraTypeStandView:
+                return LiveCameraTypeSchoolIdle;
+            case LiveCameraTypeSchoolIdle:
+                return LiveCameraTypeDynamicView;
+            default:
+                return LiveCameraTypeDynamicView;
+        }
+    }
+
+    LiveCameraType getCurrentLiveCameraType() {
+        switch (activeFesLiveView) {
+            case ActiveFesLiveView::DynamicView:
+                return LiveCameraTypeDynamicView;
+            case ActiveFesLiveView::ArenaView:
+                return LiveCameraTypeArenaView;
+            case ActiveFesLiveView::StandView:
+                return LiveCameraTypeStandView;
+            case ActiveFesLiveView::SchoolIdle:
+                return LiveCameraTypeSchoolIdle;
+            default:
+                return LiveCameraTypeUndefined;
+        }
+    }
+
+    bool requestFesLiveCameraSwitch(LiveCameraType targetView) {
+        if (!HookShare::Shareable::renderSceneIsFesLive() || !fesLiveCameraSwitcherCache) {
+            return false;
+        }
+        // Defer the actual Unity call until EndCameraRendering so button input does not mutate camera state from the input thread.
+        pendingLiveCameraTypeRequest.store(static_cast<int32_t>(targetView));
+        return true;
+    }
+
+    bool CanHandleFesLiveViewSwitchInput() {
+        return HookShare::Shareable::renderSceneIsFesLive() && fesLiveCameraSwitcherCache;
+    }
+
+    bool CanHandleSchoolIdleTargetSwitchInput() {
+        return CanHandleFesLiveViewSwitchInput() && activeFesLiveView == ActiveFesLiveView::SchoolIdle;
+    }
+
+    bool RequestNextFesLiveViewSwitch() {
+        return requestFesLiveCameraSwitch(getNextLiveCameraType(getCurrentLiveCameraType()));
+    }
+
+    bool RequestNextSchoolIdleTargetSwitch() {
+        if (!CanHandleSchoolIdleTargetSwitchInput()) {
+            return false;
+        }
+        pendingSchoolIdleTargetSwitchRequest.store(true);
+        return true;
+    }
+
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {
+        fesLiveCameraSwitcherCache = self;
         // Update the active view before the original method runs, because GetCamera hooks can fire inside it.
         switch (enableCameraType) {
             case LiveCameraType::LiveCameraTypeDynamicView:

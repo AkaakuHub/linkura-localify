@@ -677,7 +677,6 @@ namespace L4Camera {
                     camera_forward(networkInputSnapshot.leftStickY * l_sensitivity *
                                    LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
                 }
-
                 if (std::abs(networkInputSnapshot.rightStickX) > 0.01f) {
                     JRThumbRight(networkInputSnapshot.rightStickX);
                 }
@@ -740,6 +739,16 @@ namespace L4Camera {
                 constexpr uint32_t buttonX = (1u << 2);
                 const bool isAPressed = (currentButtons & buttonA) != 0;
                 const bool isXPressed = (currentButtons & buttonX) != 0;
+                const bool canHandleFesLiveViewSwitch = LinkuraLocal::HookCamera::CanHandleFesLiveViewSwitchInput();
+                const bool canHandleSchoolIdleTargetSwitch = LinkuraLocal::HookCamera::CanHandleSchoolIdleTargetSwitchInput();
+
+                // Trigger FesLive view changes on button press without breaking the existing hold modifiers.
+                if ((risingButtons & buttonY) && canHandleFesLiveViewSwitch) {
+                    LinkuraLocal::HookCamera::RequestNextFesLiveViewSwitch();
+                }
+                if ((risingButtons & buttonB) && canHandleSchoolIdleTargetSwitch) {
+                    LinkuraLocal::HookCamera::RequestNextSchoolIdleTargetSwitch();
+                }
 
                 if (!isBPressed) {
                     moveSensitivityStickLatch = 0;
