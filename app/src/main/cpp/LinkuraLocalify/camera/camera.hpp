@@ -286,7 +286,8 @@ namespace L4Camera {
     void on_cam_rawinput_joystick(JoystickEvent event);
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
-                              float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
+                              float orientationX, float orientationY, float orientationZ, float orientationW,
+                              float hmdPosX, float hmdPosY, float hmdPosZ,
                               int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees,
                               float leftEyeAngleLeftRadians, float leftEyeAngleRightRadians,
                               float leftEyeAngleUpRadians, float leftEyeAngleDownRadians,
@@ -308,6 +309,8 @@ namespace L4Camera {
     };
 
     NetworkStereoConfig GetNetworkStereoConfig();
+    float GetFreeCameraRollDegrees();
+    void ResetNetworkHeadTrackingState();
     static void recursiveAddFaceMesh(UnityResolve::UnityType::Transform* transform,
                                      L4Camera::CharacterMeshManager<void*>& set) {
         auto childCount = transform->GetChildCount();

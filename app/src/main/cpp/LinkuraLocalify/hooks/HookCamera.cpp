@@ -60,6 +60,7 @@ namespace LinkuraLocal::HookCamera {
     Il2cppUtils::Il2CppObject* idolTargetingCameraCache = nullptr;
     std::atomic<int32_t> pendingLiveCameraTypeRequest(-1);
     std::atomic<bool> pendingSchoolIdleTargetSwitchRequest(false);
+    std::atomic<bool> pendingStandViewFreeCameraReset(false);
 
     bool isStereoRequested() {
         return LinkuraLocal::Config::enableVr;
@@ -362,6 +363,8 @@ namespace LinkuraLocal::HookCamera {
         }
     }
 
+    constexpr float kMaxSafePitchDegrees = 85.0f;
+
     // 计算从 position 看向 lookAt 的水平角和垂直角
     static void CalculateAnglesFromLookAt(
             const UnityResolve::UnityType::Vector3& position,
@@ -384,7 +387,7 @@ namespace LinkuraLocal::HookCamera {
         if (horizontalDist > 0.0001f) {
             outHorizontalAngle = std::atan2(dy, horizontalDist) * 180.0f / M_PI;
         } else {
-            outHorizontalAngle = (dy > 0) ? 89.99f : -89.99f;
+            outHorizontalAngle = (dy > 0) ? kMaxSafePitchDegrees : -kMaxSafePitchDegrees;
         }
     }
 }
@@ -403,7 +406,6 @@ namespace L4Camera {
 
         // 检查缓存是否有效
         if (!cacheTrans || !Il2cppUtils::IsNativeObjectAlive(cacheTrans)) {
-            LinkuraLocal::Log::DebugFmt("SyncBaseCameraFromCurrentMode: cacheTrans invalid");
             return;
         }
 
@@ -429,14 +431,10 @@ namespace L4Camera {
         float vertAngle, horiAngle;
         CalculateAnglesFromLookAt(cameraPos, cameraLookAt, vertAngle, horiAngle);
         baseCamera.verticalAngle = vertAngle;
-        baseCamera.horizontalAngle = horiAngle;
+        baseCamera.horizontalAngle = std::clamp(horiAngle, -kMaxSafePitchDegrees, kMaxSafePitchDegrees);
 
         // FOV 保持当前值 (baseCamera.fov 在各模式下共享)
 
-        LinkuraLocal::Log::InfoFmt("SyncBaseCameraFromCurrentMode: pos(%.2f, %.2f, %.2f) lookAt(%.2f, %.2f, %.2f) angles(v:%.1f, h:%.1f)",
-            cameraPos.x, cameraPos.y, cameraPos.z,
-            cameraLookAt.x, cameraLookAt.y, cameraLookAt.z,
-            vertAngle, horiAngle);
     }
 }
 
@@ -468,6 +466,7 @@ namespace LinkuraLocal::HookCamera {
         idolTargetingCameraCache = nullptr;
         pendingLiveCameraTypeRequest.store(-1);
         pendingSchoolIdleTargetSwitchRequest.store(false);
+        pendingStandViewFreeCameraReset.store(false);
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
         HookShare::Shareable::currentArchiveDuration = 0;
@@ -580,6 +579,13 @@ namespace LinkuraLocal::HookCamera {
         applyStereoProjectionMatrices();
     }
 
+    static UnityResolve::UnityType::Quaternion applyFreeCameraRoll(
+            const UnityResolve::UnityType::Quaternion& baseRotation) {
+        auto euler = baseRotation.ToEuler();
+        euler.z += L4Camera::GetFreeCameraRollDegrees();
+        return UnityResolve::UnityType::Quaternion().Euler(euler);
+    }
+
     bool shouldDriveFreeCameraStereo() {
         return Config::enableFreeCamera
             && !HookShare::Shareable::renderSceneIsNone()
@@ -621,6 +627,11 @@ namespace LinkuraLocal::HookCamera {
                 else {
                     auto& origCameraLookat = L4Camera::baseCamera.lookAt;
                     if (freeCameraTransformCache) lookat_injected(freeCameraTransformCache, &origCameraLookat, &worldUp);
+                    const auto freeRollDegrees = L4Camera::GetFreeCameraRollDegrees();
+                    if (std::abs(freeRollDegrees) > 0.001f) {
+                        auto rolledRotation = applyFreeCameraRoll(freeCameraTransformCache->GetRotation());
+                        Unity_set_rotation_Injected_Orig(freeCameraTransformCache, &rolledRotation);
+                    }
                 }
 
                 if (isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightTransformCache)) {
@@ -1062,11 +1073,16 @@ namespace LinkuraLocal::HookCamera {
     DEFINE_HOOK(UnityResolve::UnityType::Camera*, FesLiveFixedCamera_GetCamera, (Il2cppUtils::Il2CppObject* self, void* method)) {
         Log::DebugFmt("FesLiveFixedCamera_GetCamera HOOKED");
         auto camera = FesLiveFixedCamera_GetCamera_Orig(self, method);
-        if (!initialCameraRendered) {
+        const bool shouldResetStandViewFreeCamera = pendingStandViewFreeCameraReset.exchange(false);
+        if (!initialCameraRendered || shouldResetStandViewFreeCamera) {
             sanitizeFreeCamera(camera);
         }
         if (activeFesLiveView == ActiveFesLiveView::StandView) {
             // StandView is the only FesLive mode that should keep the legacy free-camera behavior.
+            if (shouldResetStandViewFreeCamera) {
+                // Entering StandView must drop any HMD offset and roll carried from the previous camera view.
+                L4Camera::ResetNetworkHeadTrackingState();
+            }
             registerMainFreeCamera(camera);
         } else {
             if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
@@ -1166,30 +1182,36 @@ namespace LinkuraLocal::HookCamera {
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {
         fesLiveCameraSwitcherCache = self;
         // Update the active view before the original method runs, because GetCamera hooks can fire inside it.
+        const auto previousView = activeFesLiveView;
         switch (enableCameraType) {
             case LiveCameraType::LiveCameraTypeDynamicView:
                 activeFesLiveView = ActiveFesLiveView::DynamicView;
                 if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
                     L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
                 }
+                pendingStandViewFreeCameraReset.store(false);
                 break;
             case LiveCameraType::LiveCameraTypeArenaView:
                 activeFesLiveView = ActiveFesLiveView::ArenaView;
                 if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
                     L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
                 }
+                pendingStandViewFreeCameraReset.store(false);
                 break;
             case LiveCameraType::LiveCameraTypeStandView:
                 activeFesLiveView = ActiveFesLiveView::StandView;
+                pendingStandViewFreeCameraReset.store(previousView != ActiveFesLiveView::StandView);
                 break;
             case LiveCameraType::LiveCameraTypeSchoolIdle:
                 activeFesLiveView = ActiveFesLiveView::SchoolIdle;
                 if (L4Camera::GetCameraMode() == L4Camera::CameraMode::FREE) {
                     L4Camera::SetCameraMode(L4Camera::CameraMode::SYSTEM_CAMERA);
                 }
+                pendingStandViewFreeCameraReset.store(false);
                 break;
             default:
                 activeFesLiveView = ActiveFesLiveView::Unknown;
+                pendingStandViewFreeCameraReset.store(false);
                 break;
         }
         FesLiveCameraSwitcher_SwitchCamera_Orig(self, enableCameraType, method);

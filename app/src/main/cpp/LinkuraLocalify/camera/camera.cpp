@@ -18,6 +18,7 @@
 
 
 namespace L4Camera {
+    constexpr float kMaxSafePitchDegrees = 85.0f;
 	BaseCamera::Camera baseCamera{};
     BaseCamera::Camera originCamera{};
     CameraMode cameraMode = CameraMode::FREE;
@@ -37,6 +38,8 @@ namespace L4Camera {
     LinkuraLocal::Misc::CSEnum bodyPartsEnum("Head", 0xa);
     CharacterMeshFirstPersonManager<void*> followCharaSet;
     CharacterMeshRenderManager<void*> charaRenderSet;
+
+    void ResetNetworkHeadTrackingState();
 
 	// bool rMousePressFlg = false;
 
@@ -62,6 +65,7 @@ namespace L4Camera {
         followLookAtOffset = {0, 0};
 		baseCamera.reset();
         originCamera.reset();
+        ResetNetworkHeadTrackingState();
 	}
 
 	void camera_forward(float multiplier = 1.0f) {  // 向前
@@ -162,12 +166,12 @@ namespace L4Camera {
 	}
 	void cameraLookat_up(float mAngel, bool mouse = false) {
 		baseCamera.horizontalAngle += mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
-		if (baseCamera.horizontalAngle >= 90) baseCamera.horizontalAngle = 89.99;
+		if (baseCamera.horizontalAngle >= kMaxSafePitchDegrees) baseCamera.horizontalAngle = kMaxSafePitchDegrees;
 		baseCamera.updateVertLook();
 	}
 	void cameraLookat_down(float mAngel, bool mouse = false) {
 		baseCamera.horizontalAngle -= mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
-		if (baseCamera.horizontalAngle <= -90) baseCamera.horizontalAngle = -89.99;
+		if (baseCamera.horizontalAngle <= -kMaxSafePitchDegrees) baseCamera.horizontalAngle = -kMaxSafePitchDegrees;
 		baseCamera.updateVertLook();
 	}
 	void cameraLookat_left(float mAngel) {
@@ -555,19 +559,29 @@ namespace L4Camera {
         float leftGrip = 0.0f;
         float rightTrigger = 0.0f;
         float rightGrip = 0.0f;
-        float yaw = 0.0f;
-        float pitch = 0.0f;
-        float roll = 0.0f;
+        float orientationX = 0.0f;
+        float orientationY = 0.0f;
+        float orientationZ = 0.0f;
+        float orientationW = 1.0f;
         float hmdPosX = 0.0f;
         float hmdPosY = 0.0f;
         float hmdPosZ = 0.0f;
-        float prevHmdPosX = 0.0f;
-        float prevHmdPosY = 0.0f;
-        float prevHmdPosZ = 0.0f;
-        float prevYaw = 0.0f;
-        float prevPitch = 0.0f;
-        float filteredYawDelta = 0.0f;
-        float filteredPitchDelta = 0.0f;
+        float baselineHmdPosX = 0.0f;
+        float baselineHmdPosY = 0.0f;
+        float baselineHmdPosZ = 0.0f;
+        float appliedHmdOffsetX = 0.0f;
+        float appliedHmdOffsetY = 0.0f;
+        float appliedHmdOffsetZ = 0.0f;
+        float baselineOrientationX = 0.0f;
+        float baselineOrientationY = 0.0f;
+        float baselineOrientationZ = 0.0f;
+        float baselineOrientationW = 1.0f;
+        float smoothedYawOffsetDegrees = 0.0f;
+        float smoothedPitchOffsetDegrees = 0.0f;
+        float smoothedRollOffsetDegrees = 0.0f;
+        float appliedYawOffsetDegrees = 0.0f;
+        float appliedPitchOffsetDegrees = 0.0f;
+        float appliedRollOffsetDegrees = 0.0f;
         float ipdMeters = 0.064f;
         float hmdVerticalFovDegrees = 90.0f;
         float leftEyeAngleLeftRadians = -0.7853982f;
@@ -578,13 +592,14 @@ namespace L4Camera {
         float rightEyeAngleRightRadians = 0.7853982f;
         float rightEyeAngleUpRadians = 0.7853982f;
         float rightEyeAngleDownRadians = -0.7853982f;
-        bool hasPrevHmdPose = false;
-        bool hasPrevHeadAngle = false;
+        bool hasHmdOrigin = false;
+        bool hasHeadOrientationOrigin = false;
         uint32_t buttons = 0;
         uint32_t prevButtons = 0;
         uint32_t flags = 0;
     } networkCameraInputState;
     std::mutex networkCameraInputMutex;
+    constexpr uint32_t networkInputFlagResetBaseline = 1u << 1;
 
     float normalizeRadianDelta(float value) {
         constexpr float twoPi = 2.0f * static_cast<float>(M_PI);
@@ -599,6 +614,176 @@ namespace L4Camera {
 
     float clampAbs(float value, float maxAbs) {
         return std::clamp(value, -maxAbs, maxAbs);
+    }
+
+    float radToDeg(float value) {
+        return value * 57.2957795f;
+    }
+
+    void clampBaseCameraPitch() {
+        const auto clampedPitch = std::clamp(
+            baseCamera.horizontalAngle,
+            -kMaxSafePitchDegrees,
+            kMaxSafePitchDegrees
+        );
+        if (std::abs(clampedPitch - baseCamera.horizontalAngle) > 0.0001f) {
+            baseCamera.horizontalAngle = clampedPitch;
+            baseCamera.updateVertLook();
+        }
+    }
+
+    struct QuaternionInput {
+        float x;
+        float y;
+        float z;
+        float w;
+    };
+
+    struct Vector3Input {
+        float x;
+        float y;
+        float z;
+    };
+
+    QuaternionInput normalizeQuaternion(QuaternionInput value) {
+        const float lengthSquared =
+            (value.x * value.x) + (value.y * value.y) + (value.z * value.z) + (value.w * value.w);
+        if (!std::isfinite(lengthSquared) || lengthSquared <= 0.000001f) {
+            return {0.0f, 0.0f, 0.0f, 1.0f};
+        }
+        const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+        return {
+            value.x * inverseLength,
+            value.y * inverseLength,
+            value.z * inverseLength,
+            value.w * inverseLength
+        };
+    }
+
+    QuaternionInput conjugateQuaternion(const QuaternionInput& value) {
+        return {-value.x, -value.y, -value.z, value.w};
+    }
+
+    QuaternionInput multiplyQuaternion(const QuaternionInput& lhs, const QuaternionInput& rhs) {
+        return {
+            (lhs.w * rhs.x) + (lhs.x * rhs.w) + (lhs.y * rhs.z) - (lhs.z * rhs.y),
+            (lhs.w * rhs.y) - (lhs.x * rhs.z) + (lhs.y * rhs.w) + (lhs.z * rhs.x),
+            (lhs.w * rhs.z) + (lhs.x * rhs.y) - (lhs.y * rhs.x) + (lhs.z * rhs.w),
+            (lhs.w * rhs.w) - (lhs.x * rhs.x) - (lhs.y * rhs.y) - (lhs.z * rhs.z)
+        };
+    }
+
+    Vector3Input rotateVector(const QuaternionInput& rotation, const Vector3Input& value) {
+        const QuaternionInput vectorQuaternion{value.x, value.y, value.z, 0.0f};
+        const auto rotated = multiplyQuaternion(
+            multiplyQuaternion(rotation, vectorQuaternion),
+            conjugateQuaternion(rotation)
+        );
+        return {rotated.x, rotated.y, rotated.z};
+    }
+
+    float vectorLength(const Vector3Input& value) {
+        return std::sqrt((value.x * value.x) + (value.y * value.y) + (value.z * value.z));
+    }
+
+    Vector3Input normalizeVector(const Vector3Input& value) {
+        const float length = vectorLength(value);
+        if (!std::isfinite(length) || length <= 0.000001f) {
+            return {0.0f, 0.0f, 0.0f};
+        }
+        return {value.x / length, value.y / length, value.z / length};
+    }
+
+    Vector3Input crossVector(const Vector3Input& lhs, const Vector3Input& rhs) {
+        return {
+            (lhs.y * rhs.z) - (lhs.z * rhs.y),
+            (lhs.z * rhs.x) - (lhs.x * rhs.z),
+            (lhs.x * rhs.y) - (lhs.y * rhs.x)
+        };
+    }
+
+    float dotVector(const Vector3Input& lhs, const Vector3Input& rhs) {
+        return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z);
+    }
+
+    Vector3Input convertOpenXrVectorToUnity(const Vector3Input& value) {
+        // OpenXR view space is right-handed (+X right, +Y up, -Z forward),
+        // while Unity camera space is left-handed (+X right, +Y up, +Z forward).
+        return {value.x, value.y, -value.z};
+    }
+
+    Vector3Input rejectVectorOnAxis(const Vector3Input& value, const Vector3Input& axis) {
+        const auto normalizedAxis = normalizeVector(axis);
+        return {
+            value.x - (normalizedAxis.x * dotVector(value, normalizedAxis)),
+            value.y - (normalizedAxis.y * dotVector(value, normalizedAxis)),
+            value.z - (normalizedAxis.z * dotVector(value, normalizedAxis))
+        };
+    }
+
+    float signedAngleDegreesAroundAxis(
+        const Vector3Input& from,
+        const Vector3Input& to,
+        const Vector3Input& axis
+    ) {
+        const auto fromNormalized = normalizeVector(from);
+        const auto toNormalized = normalizeVector(to);
+        const auto axisNormalized = normalizeVector(axis);
+        if (vectorLength(fromNormalized) <= 0.000001f
+            || vectorLength(toNormalized) <= 0.000001f
+            || vectorLength(axisNormalized) <= 0.000001f) {
+            return 0.0f;
+        }
+        const auto cross = crossVector(fromNormalized, toNormalized);
+        const auto sinValue = dotVector(axisNormalized, cross);
+        const auto cosValue = std::clamp(dotVector(fromNormalized, toNormalized), -1.0f, 1.0f);
+        return radToDeg(std::atan2(sinValue, cosValue));
+    }
+
+    void calculateHeadRelativeAnglesDegrees(
+        const QuaternionInput& baseline,
+        const QuaternionInput& current,
+        float& yawDegrees,
+        float& pitchDegrees,
+        float& rollDegrees
+    ) {
+        const auto baselineForward = normalizeVector(convertOpenXrVectorToUnity(
+            rotateVector(normalizeQuaternion(baseline), {0.0f, 0.0f, -1.0f})
+        ));
+        const auto baselineUp = normalizeVector(convertOpenXrVectorToUnity(
+            rotateVector(normalizeQuaternion(baseline), {0.0f, 1.0f, 0.0f})
+        ));
+        const auto currentForward = normalizeVector(convertOpenXrVectorToUnity(
+            rotateVector(normalizeQuaternion(current), {0.0f, 0.0f, -1.0f})
+        ));
+        const auto currentUp = normalizeVector(convertOpenXrVectorToUnity(
+            rotateVector(normalizeQuaternion(current), {0.0f, 1.0f, 0.0f})
+        ));
+
+        const auto worldUp = Vector3Input{0.0f, 1.0f, 0.0f};
+        const auto baselineHorizontalForward = rejectVectorOnAxis(baselineForward, worldUp);
+        const auto currentHorizontalForward = rejectVectorOnAxis(currentForward, worldUp);
+        yawDegrees = signedAngleDegreesAroundAxis(
+            baselineHorizontalForward,
+            currentHorizontalForward,
+            worldUp
+        );
+
+        const auto baselinePitchDegrees = radToDeg(std::asin(std::clamp(baselineForward.y, -1.0f, 1.0f)));
+        const auto currentPitchDegrees = radToDeg(std::asin(std::clamp(currentForward.y, -1.0f, 1.0f)));
+        pitchDegrees = currentPitchDegrees - baselinePitchDegrees;
+
+        const auto baselineRollUp = rejectVectorOnAxis(baselineUp, currentForward);
+        const auto currentRollUp = rejectVectorOnAxis(currentUp, currentForward);
+        rollDegrees = signedAngleDegreesAroundAxis(
+            baselineRollUp,
+            currentRollUp,
+            currentForward
+        );
+
+        if (!std::isfinite(yawDegrees)) yawDegrees = 0.0f;
+        if (!std::isfinite(pitchDegrees)) pitchDegrees = 0.0f;
+        if (!std::isfinite(rollDegrees)) rollDegrees = 0.0f;
     }
 
 
@@ -684,42 +869,94 @@ namespace L4Camera {
                     JRThumbDown(-networkInputSnapshot.rightStickY);
                 }
 
-                const float cameraYawInputRad = networkInputSnapshot.pitch;
-                const float cameraPitchInputRad = networkInputSnapshot.roll;
-                float yawDeltaRad = 0.0f;
-                float pitchDeltaRad = 0.0f;
-                if (networkInputSnapshot.hasPrevHeadAngle) {
-                    yawDeltaRad = normalizeRadianDelta(cameraYawInputRad - networkInputSnapshot.prevYaw);
-                    pitchDeltaRad = normalizeRadianDelta(cameraPitchInputRad - networkInputSnapshot.prevPitch);
-                }
+                constexpr float hmdRotationGain = 1.6f;
+                constexpr float hmdRollGain = 1.0f;
+                constexpr float yprSmoothing = 0.35f;
+                constexpr float yprDeadzoneDegrees = 0.12f;
+                if (networkInputSnapshot.hasHeadOrientationOrigin) {
+                    float relativeYawDegrees = 0.0f;
+                    float relativePitchDegrees = 0.0f;
+                    float relativeRollDegrees = 0.0f;
+                    calculateHeadRelativeAnglesDegrees(
+                        {
+                            networkInputSnapshot.baselineOrientationX,
+                            networkInputSnapshot.baselineOrientationY,
+                            networkInputSnapshot.baselineOrientationZ,
+                            networkInputSnapshot.baselineOrientationW
+                        },
+                        {
+                            networkInputSnapshot.orientationX,
+                            networkInputSnapshot.orientationY,
+                            networkInputSnapshot.orientationZ,
+                            networkInputSnapshot.orientationW
+                        },
+                        relativeYawDegrees,
+                        relativePitchDegrees,
+                        relativeRollDegrees
+                    );
+                    // OpenXR quaternion transport is correct, but the camera controls in this project
+                    // do not map to semantic yaw/pitch/roll names one-to-one.
+                    // These angles are derived after converting OpenXR's right-handed basis
+                    // into Unity's left-handed camera basis, so their semantic names match
+                    // the actual camera controls here.
+                    auto desiredYawOffsetDegrees =
+                        relativeYawDegrees * hmdRotationGain;
+                    auto desiredPitchOffsetDegrees =
+                        relativePitchDegrees * hmdRotationGain;
+                    auto desiredRollOffsetDegrees =
+                        relativeRollDegrees * hmdRollGain;
 
-                yawDeltaRad = clampAbs(yawDeltaRad, 0.2f);
-                pitchDeltaRad = clampAbs(pitchDeltaRad, 0.2f);
-                constexpr float yprSmoothing = 0.2f;
-                constexpr float yprDeadzoneRad = 0.002f;
-                yawDeltaRad = networkInputSnapshot.filteredYawDelta + (yawDeltaRad - networkInputSnapshot.filteredYawDelta) * yprSmoothing;
-                pitchDeltaRad = networkInputSnapshot.filteredPitchDelta + (pitchDeltaRad - networkInputSnapshot.filteredPitchDelta) * yprSmoothing;
-                if (std::abs(yawDeltaRad) < yprDeadzoneRad) yawDeltaRad = 0.0f;
-                if (std::abs(pitchDeltaRad) < yprDeadzoneRad) pitchDeltaRad = 0.0f;
+                    desiredPitchOffsetDegrees = clampAbs(desiredPitchOffsetDegrees, 75.0f);
+                    desiredRollOffsetDegrees = clampAbs(desiredRollOffsetDegrees, 75.0f);
 
-                {
+                    auto smoothedYawOffsetDegrees =
+                        networkInputSnapshot.smoothedYawOffsetDegrees
+                        + (desiredYawOffsetDegrees - networkInputSnapshot.smoothedYawOffsetDegrees) * yprSmoothing;
+                    auto smoothedPitchOffsetDegrees =
+                        networkInputSnapshot.smoothedPitchOffsetDegrees
+                        + (desiredPitchOffsetDegrees - networkInputSnapshot.smoothedPitchOffsetDegrees) * yprSmoothing;
+                    auto smoothedRollOffsetDegrees =
+                        networkInputSnapshot.smoothedRollOffsetDegrees
+                        + (desiredRollOffsetDegrees - networkInputSnapshot.smoothedRollOffsetDegrees) * yprSmoothing;
+
+                    if (std::abs(smoothedYawOffsetDegrees) < yprDeadzoneDegrees) smoothedYawOffsetDegrees = 0.0f;
+                    if (std::abs(smoothedPitchOffsetDegrees) < yprDeadzoneDegrees) smoothedPitchOffsetDegrees = 0.0f;
+                    if (std::abs(smoothedRollOffsetDegrees) < yprDeadzoneDegrees) smoothedRollOffsetDegrees = 0.0f;
+
+                    const auto yawDeltaDegrees =
+                        smoothedYawOffsetDegrees - networkInputSnapshot.appliedYawOffsetDegrees;
+                    const auto pitchDeltaDegrees =
+                        smoothedPitchOffsetDegrees - networkInputSnapshot.appliedPitchOffsetDegrees;
+
+                    if (std::abs(yawDeltaDegrees) > 0.001f) {
+                        cameraLookat_right(yawDeltaDegrees / LinkuraLocal::Config::cameraRotationSensitivity);
+                    }
+                    if (std::abs(pitchDeltaDegrees) > 0.001f) {
+                        cameraLookat_down(-pitchDeltaDegrees / LinkuraLocal::Config::cameraRotationSensitivity);
+                    }
+
+                    {
+                        std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+                        networkCameraInputState.smoothedYawOffsetDegrees = smoothedYawOffsetDegrees;
+                        networkCameraInputState.smoothedPitchOffsetDegrees = smoothedPitchOffsetDegrees;
+                        networkCameraInputState.smoothedRollOffsetDegrees = smoothedRollOffsetDegrees;
+                        networkCameraInputState.appliedYawOffsetDegrees = smoothedYawOffsetDegrees;
+                        networkCameraInputState.appliedPitchOffsetDegrees = smoothedPitchOffsetDegrees;
+                        networkCameraInputState.appliedRollOffsetDegrees = smoothedRollOffsetDegrees;
+                    }
+                } else {
                     std::lock_guard<std::mutex> lock(networkCameraInputMutex);
-                    networkCameraInputState.prevYaw = cameraYawInputRad;
-                    networkCameraInputState.prevPitch = cameraPitchInputRad;
-                    networkCameraInputState.filteredYawDelta = yawDeltaRad;
-                    networkCameraInputState.filteredPitchDelta = pitchDeltaRad;
-                    networkCameraInputState.hasPrevHeadAngle = true;
-                }
-
-                constexpr float hmdRotationGain = 3.0f;
-                constexpr float radToStickScale = 35.0f;
-                const float hmdYawStick = std::clamp(-yawDeltaRad * radToStickScale * hmdRotationGain, -1.0f, 1.0f);
-                const float hmdPitchStick = std::clamp(-pitchDeltaRad * radToStickScale * hmdRotationGain, -1.0f, 1.0f);
-                if (std::abs(hmdYawStick) > 0.001f) {
-                    JRThumbRight(hmdYawStick);
-                }
-                if (std::abs(hmdPitchStick) > 0.001f) {
-                    JRThumbDown(hmdPitchStick);
+                    networkCameraInputState.baselineOrientationX = networkInputSnapshot.orientationX;
+                    networkCameraInputState.baselineOrientationY = networkInputSnapshot.orientationY;
+                    networkCameraInputState.baselineOrientationZ = networkInputSnapshot.orientationZ;
+                    networkCameraInputState.baselineOrientationW = networkInputSnapshot.orientationW;
+                    networkCameraInputState.smoothedYawOffsetDegrees = 0.0f;
+                    networkCameraInputState.smoothedPitchOffsetDegrees = 0.0f;
+                    networkCameraInputState.smoothedRollOffsetDegrees = 0.0f;
+                    networkCameraInputState.appliedYawOffsetDegrees = 0.0f;
+                    networkCameraInputState.appliedPitchOffsetDegrees = 0.0f;
+                    networkCameraInputState.appliedRollOffsetDegrees = 0.0f;
+                    networkCameraInputState.hasHeadOrientationOrigin = true;
                 }
 
                 const auto currentButtons = networkInputSnapshot.buttons;
@@ -837,30 +1074,57 @@ namespace L4Camera {
                     reset_camera();
                 }
 
-                if (networkInputSnapshot.hasPrevHmdPose) {
-                    const float deltaHmdX = networkInputSnapshot.hmdPosX - networkInputSnapshot.prevHmdPosX;
-                    const float deltaHmdY = networkInputSnapshot.hmdPosY - networkInputSnapshot.prevHmdPosY;
-                    const float deltaHmdZ = networkInputSnapshot.hmdPosZ - networkInputSnapshot.prevHmdPosZ;
-                    constexpr float hmdPosGain = 20.0f;
-                    constexpr float hmdPosDeadzone = 0.00005f;
+                constexpr float hmdPosGain = 24.0f;
+                constexpr float hmdPosDeadzone = 0.00005f;
+                const float horizontalMoveScale =
+                    hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60;
+                const float verticalMoveScale =
+                    hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60;
+                // Drive the camera toward an absolute session-relative offset instead of accumulating frame deltas.
+                if (networkInputSnapshot.hasHmdOrigin) {
+                    const float targetOffsetX =
+                        (networkInputSnapshot.hmdPosX - networkInputSnapshot.baselineHmdPosX) * horizontalMoveScale;
+                    const float targetOffsetY =
+                        (networkInputSnapshot.hmdPosY - networkInputSnapshot.baselineHmdPosY) * verticalMoveScale;
+                    const float targetOffsetZ =
+                        (networkInputSnapshot.hmdPosZ - networkInputSnapshot.baselineHmdPosZ) * horizontalMoveScale;
+                    const float deltaOffsetX = targetOffsetX - networkInputSnapshot.appliedHmdOffsetX;
+                    const float deltaOffsetY = targetOffsetY - networkInputSnapshot.appliedHmdOffsetY;
+                    const float deltaOffsetZ = targetOffsetZ - networkInputSnapshot.appliedHmdOffsetZ;
+                    const float horizontalDeadzone = hmdPosDeadzone * horizontalMoveScale;
+                    const float verticalDeadzone = hmdPosDeadzone * verticalMoveScale;
 
-                    if (std::abs(deltaHmdX) > hmdPosDeadzone) {
-                        camera_right(deltaHmdX * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                    if (std::abs(deltaOffsetX) > horizontalDeadzone) {
+                        camera_right(deltaOffsetX);
                     }
-                    if (std::abs(deltaHmdY) > hmdPosDeadzone) {
-                        camera_up(deltaHmdY * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                    if (std::abs(deltaOffsetY) > verticalDeadzone) {
+                        camera_up(deltaOffsetY);
                     }
-                    if (std::abs(deltaHmdZ) > hmdPosDeadzone) {
-                        camera_forward(deltaHmdZ * hmdPosGain * l_sensitivity * LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
+                    if (std::abs(deltaOffsetZ) > horizontalDeadzone) {
+                        camera_forward(deltaOffsetZ);
                     }
                 }
                 {
                     std::lock_guard<std::mutex> lock(networkCameraInputMutex);
-                    networkCameraInputState.prevHmdPosX = networkInputSnapshot.hmdPosX;
-                    networkCameraInputState.prevHmdPosY = networkInputSnapshot.hmdPosY;
-                    networkCameraInputState.prevHmdPosZ = networkInputSnapshot.hmdPosZ;
-                    networkCameraInputState.hasPrevHmdPose = true;
+                    if (!networkCameraInputState.hasHmdOrigin) {
+                        networkCameraInputState.baselineHmdPosX = networkInputSnapshot.hmdPosX;
+                        networkCameraInputState.baselineHmdPosY = networkInputSnapshot.hmdPosY;
+                        networkCameraInputState.baselineHmdPosZ = networkInputSnapshot.hmdPosZ;
+                        networkCameraInputState.appliedHmdOffsetX = 0.0f;
+                        networkCameraInputState.appliedHmdOffsetY = 0.0f;
+                        networkCameraInputState.appliedHmdOffsetZ = 0.0f;
+                        networkCameraInputState.hasHmdOrigin = true;
+                    } else {
+                        networkCameraInputState.appliedHmdOffsetX =
+                            (networkCameraInputState.hmdPosX - networkCameraInputState.baselineHmdPosX) * horizontalMoveScale;
+                        networkCameraInputState.appliedHmdOffsetY =
+                            (networkCameraInputState.hmdPosY - networkCameraInputState.baselineHmdPosY) * verticalMoveScale;
+                        networkCameraInputState.appliedHmdOffsetZ =
+                            (networkCameraInputState.hmdPosZ - networkCameraInputState.baselineHmdPosZ) * horizontalMoveScale;
+                    }
                 }
+
+                clampBaseCameraPitch();
 
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			}
@@ -1006,12 +1270,14 @@ namespace L4Camera {
 
     void on_cam_network_input(float leftStickX, float leftStickY, float rightStickX, float rightStickY,
                               float leftTrigger, float leftGrip, float rightTrigger, float rightGrip,
-                              float yaw, float pitch, float roll, float hmdPosX, float hmdPosY, float hmdPosZ,
+                              float orientationX, float orientationY, float orientationZ, float orientationW,
+                              float hmdPosX, float hmdPosY, float hmdPosZ,
                               int buttons, int flags, float ipdMeters, float hmdVerticalFovDegrees,
                               float leftEyeAngleLeftRadians, float leftEyeAngleRightRadians,
                               float leftEyeAngleUpRadians, float leftEyeAngleDownRadians,
                               float rightEyeAngleLeftRadians, float rightEyeAngleRightRadians,
                               float rightEyeAngleUpRadians, float rightEyeAngleDownRadians) {
+        // This layer translates raw network pose input into game camera state and owns all per-session baselines.
         constexpr float minFovAngle = -1.55f;
         constexpr float maxFovAngle = 1.55f;
         const float fallbackHalfVerticalRadians = std::clamp(hmdVerticalFovDegrees, 20.0f, 170.0f) * 0.00872664625f;
@@ -1023,6 +1289,25 @@ namespace L4Camera {
         };
 
         std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+        const uint32_t inputFlags = static_cast<uint32_t>(flags);
+        // Drop the previous-frame baseline when a new input session starts.
+        if ((inputFlags & networkInputFlagResetBaseline) != 0u) {
+            networkCameraInputState.hasHmdOrigin = false;
+            networkCameraInputState.appliedHmdOffsetX = 0.0f;
+            networkCameraInputState.appliedHmdOffsetY = 0.0f;
+            networkCameraInputState.appliedHmdOffsetZ = 0.0f;
+            networkCameraInputState.hasHeadOrientationOrigin = false;
+            networkCameraInputState.baselineOrientationX = 0.0f;
+            networkCameraInputState.baselineOrientationY = 0.0f;
+            networkCameraInputState.baselineOrientationZ = 0.0f;
+            networkCameraInputState.baselineOrientationW = 1.0f;
+            networkCameraInputState.smoothedYawOffsetDegrees = 0.0f;
+            networkCameraInputState.smoothedPitchOffsetDegrees = 0.0f;
+            networkCameraInputState.smoothedRollOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedYawOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedPitchOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedRollOffsetDegrees = 0.0f;
+        }
         networkCameraInputState.leftStickX = std::clamp(leftStickX, -1.0f, 1.0f);
         networkCameraInputState.leftStickY = std::clamp(leftStickY, -1.0f, 1.0f);
         networkCameraInputState.rightStickX = std::clamp(rightStickX, -1.0f, 1.0f);
@@ -1031,9 +1316,16 @@ namespace L4Camera {
         networkCameraInputState.leftGrip = std::clamp(leftGrip, 0.0f, 1.0f);
         networkCameraInputState.rightTrigger = std::clamp(rightTrigger, 0.0f, 1.0f);
         networkCameraInputState.rightGrip = std::clamp(rightGrip, 0.0f, 1.0f);
-        networkCameraInputState.yaw = yaw;
-        networkCameraInputState.pitch = pitch;
-        networkCameraInputState.roll = roll;
+        const auto normalizedOrientation = normalizeQuaternion({
+            orientationX,
+            orientationY,
+            orientationZ,
+            orientationW
+        });
+        networkCameraInputState.orientationX = normalizedOrientation.x;
+        networkCameraInputState.orientationY = normalizedOrientation.y;
+        networkCameraInputState.orientationZ = normalizedOrientation.z;
+        networkCameraInputState.orientationW = normalizedOrientation.w;
         networkCameraInputState.hmdPosX = hmdPosX;
         networkCameraInputState.hmdPosY = hmdPosY;
         networkCameraInputState.hmdPosZ = hmdPosZ;
@@ -1064,32 +1356,7 @@ namespace L4Camera {
             networkCameraInputState.rightEyeAngleUpRadians = fallbackHalfVerticalRadians;
         }
         networkCameraInputState.buttons = static_cast<uint32_t>(buttons);
-        networkCameraInputState.flags = static_cast<uint32_t>(flags);
-        static auto lastTelemetryLogAt = std::chrono::steady_clock::now();
-        const auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTelemetryLogAt).count() >= 1000) {
-            lastTelemetryLogAt = now;
-            LinkuraLocal::Log::InfoFmt(
-                "Network input telemetry: ipd=%.4f vFov=%.2f leftFov=(%.4f,%.4f,%.4f,%.4f) rightFov=(%.4f,%.4f,%.4f,%.4f) baseFov=%.2f yaw=%.3f pitch=%.3f roll=%.3f flags=%u buttons=%u",
-                networkCameraInputState.ipdMeters,
-                networkCameraInputState.hmdVerticalFovDegrees,
-                networkCameraInputState.leftEyeAngleLeftRadians,
-                networkCameraInputState.leftEyeAngleRightRadians,
-                networkCameraInputState.leftEyeAngleUpRadians,
-                networkCameraInputState.leftEyeAngleDownRadians,
-                networkCameraInputState.rightEyeAngleLeftRadians,
-                networkCameraInputState.rightEyeAngleRightRadians,
-                networkCameraInputState.rightEyeAngleUpRadians,
-                networkCameraInputState.rightEyeAngleDownRadians,
-                baseCamera.fov,
-                networkCameraInputState.yaw,
-                networkCameraInputState.pitch,
-                networkCameraInputState.roll,
-                networkCameraInputState.flags,
-                networkCameraInputState.buttons
-            );
-        }
-
+        networkCameraInputState.flags = inputFlags;
         if (networkCameraInputState.leftStickX == 0.0f &&
             networkCameraInputState.leftStickY == 0.0f &&
             networkCameraInputState.rightStickX == 0.0f &&
@@ -1098,17 +1365,25 @@ namespace L4Camera {
             networkCameraInputState.leftGrip == 0.0f &&
             networkCameraInputState.rightTrigger == 0.0f &&
             networkCameraInputState.rightGrip == 0.0f &&
-            networkCameraInputState.yaw == 0.0f &&
-            networkCameraInputState.pitch == 0.0f &&
-            networkCameraInputState.roll == 0.0f &&
             networkCameraInputState.hmdPosX == 0.0f &&
             networkCameraInputState.hmdPosY == 0.0f &&
             networkCameraInputState.hmdPosZ == 0.0f &&
             networkCameraInputState.buttons == 0) {
-            networkCameraInputState.hasPrevHmdPose = false;
-            networkCameraInputState.hasPrevHeadAngle = false;
-            networkCameraInputState.filteredYawDelta = 0.0f;
-            networkCameraInputState.filteredPitchDelta = 0.0f;
+            networkCameraInputState.hasHmdOrigin = false;
+            networkCameraInputState.appliedHmdOffsetX = 0.0f;
+            networkCameraInputState.appliedHmdOffsetY = 0.0f;
+            networkCameraInputState.appliedHmdOffsetZ = 0.0f;
+            networkCameraInputState.hasHeadOrientationOrigin = false;
+            networkCameraInputState.baselineOrientationX = 0.0f;
+            networkCameraInputState.baselineOrientationY = 0.0f;
+            networkCameraInputState.baselineOrientationZ = 0.0f;
+            networkCameraInputState.baselineOrientationW = 1.0f;
+            networkCameraInputState.smoothedYawOffsetDegrees = 0.0f;
+            networkCameraInputState.smoothedPitchOffsetDegrees = 0.0f;
+            networkCameraInputState.smoothedRollOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedYawOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedPitchOffsetDegrees = 0.0f;
+            networkCameraInputState.appliedRollOffsetDegrees = 0.0f;
         }
     }
 
@@ -1125,6 +1400,33 @@ namespace L4Camera {
         config.rightEyeAngleUpRadians = networkCameraInputState.rightEyeAngleUpRadians;
         config.rightEyeAngleDownRadians = networkCameraInputState.rightEyeAngleDownRadians;
         return config;
+    }
+
+    float GetFreeCameraRollDegrees() {
+        std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+        return networkCameraInputState.appliedRollOffsetDegrees;
+    }
+
+    void ResetNetworkHeadTrackingState() {
+        std::lock_guard<std::mutex> lock(networkCameraInputMutex);
+        networkCameraInputState.hasHmdOrigin = false;
+        networkCameraInputState.baselineHmdPosX = 0.0f;
+        networkCameraInputState.baselineHmdPosY = 0.0f;
+        networkCameraInputState.baselineHmdPosZ = 0.0f;
+        networkCameraInputState.appliedHmdOffsetX = 0.0f;
+        networkCameraInputState.appliedHmdOffsetY = 0.0f;
+        networkCameraInputState.appliedHmdOffsetZ = 0.0f;
+        networkCameraInputState.hasHeadOrientationOrigin = false;
+        networkCameraInputState.baselineOrientationX = 0.0f;
+        networkCameraInputState.baselineOrientationY = 0.0f;
+        networkCameraInputState.baselineOrientationZ = 0.0f;
+        networkCameraInputState.baselineOrientationW = 1.0f;
+        networkCameraInputState.smoothedYawOffsetDegrees = 0.0f;
+        networkCameraInputState.smoothedPitchOffsetDegrees = 0.0f;
+        networkCameraInputState.smoothedRollOffsetDegrees = 0.0f;
+        networkCameraInputState.appliedYawOffsetDegrees = 0.0f;
+        networkCameraInputState.appliedPitchOffsetDegrees = 0.0f;
+        networkCameraInputState.appliedRollOffsetDegrees = 0.0f;
     }
 
 	void initCameraSettings() {

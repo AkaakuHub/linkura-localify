@@ -124,9 +124,10 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput
                                                                                 jfloat leftGrip,
                                                                                 jfloat rightTrigger,
                                                                                 jfloat rightGrip,
-                                                                                jfloat yaw,
-                                                                                jfloat pitch,
-                                                                                jfloat roll,
+                                                                                jfloat orientationX,
+                                                                                jfloat orientationY,
+                                                                                jfloat orientationZ,
+                                                                                jfloat orientationW,
                                                                                 jfloat hmdPosX,
                                                                                 jfloat hmdPosY,
                                                                                 jfloat hmdPosZ,
@@ -146,7 +147,8 @@ Java_io_github_chocolzs_linkura_localify_LinkuraHookMain_applyWindowsCameraInput
     (void)clazz;
     L4Camera::on_cam_network_input(leftStickX, leftStickY, rightStickX, rightStickY,
                                    leftTrigger, leftGrip, rightTrigger, rightGrip,
-                                   yaw, pitch, roll, hmdPosX, hmdPosY, hmdPosZ, buttons, flags, ipdMeters, hmdVerticalFovDegrees,
+                                   orientationX, orientationY, orientationZ, orientationW,
+                                   hmdPosX, hmdPosY, hmdPosZ, buttons, flags, ipdMeters, hmdVerticalFovDegrees,
                                    leftEyeAngleLeftRadians, leftEyeAngleRightRadians, leftEyeAngleUpRadians, leftEyeAngleDownRadians,
                                    rightEyeAngleLeftRadians, rightEyeAngleRightRadians, rightEyeAngleUpRadians, rightEyeAngleDownRadians);
 }

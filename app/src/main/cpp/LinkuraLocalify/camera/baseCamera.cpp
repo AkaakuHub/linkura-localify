@@ -1,5 +1,6 @@
 #include "baseCamera.hpp"
 #include <thread>
+#include <algorithm>
 
 #include "../../platformDefine.hpp"
 
@@ -10,6 +11,7 @@
 
 namespace BaseCamera {
 	using Vector3_t = UnityResolve::UnityType::Vector3;
+    constexpr float kMaxSafePitchDegrees = 85.0f;
 
     float multiplier = 0.6;
 
@@ -59,7 +61,11 @@ namespace BaseCamera {
         this->setLookAt(camera->lookAt.x, camera->lookAt.y, camera->lookAt.z);
         this->fov = camera->fov;
         this->verticalAngle = camera->verticalAngle;
-        this->horizontalAngle = camera->horizontalAngle;
+        this->horizontalAngle = std::clamp(
+            camera->horizontalAngle,
+            -kMaxSafePitchDegrees,
+            kMaxSafePitchDegrees
+        );
     }
 
 	void Camera::reset() {
@@ -80,12 +86,10 @@ namespace BaseCamera {
 
 	void Camera::set_lon_move(float vertanglePlus, LonMoveHState moveState, float multiplier) {  // 前后移动
 		auto radian = (verticalAngle + vertanglePlus) * M_PI / 180;
-		auto radianH = (double)horizontalAngle * M_PI / 180;
-
-		auto f_step = cos(radian) * moveStep * cos(radianH) / smoothLevel * multiplier;  // ↑↓
-		auto l_step = sin(radian) * moveStep * cos(radianH) / smoothLevel * multiplier;  // ←→
-		// auto h_step = tan(radianH) * sqrt(pow(f_step, 2) + pow(l_step, 2));
-		auto h_step = sin(radianH) * moveStep / smoothLevel * multiplier;
+		auto f_step = cos(radian) * moveStep / smoothLevel * multiplier;
+		auto l_step = sin(radian) * moveStep / smoothLevel * multiplier;
+		// Keep horizontal movement parallel to the ground even when the camera is tilted up or down.
+		auto h_step = 0.0;
 
 		switch (moveState)
 		{

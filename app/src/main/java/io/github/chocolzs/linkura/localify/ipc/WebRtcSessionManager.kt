@@ -31,12 +31,13 @@ class WebRtcSessionManager private constructor() {
     companion object {
         private const val TAG = "WebRtcSessionManager"
         private const val DEFAULT_SIGNALING_PORT = 39200
+        private const val INPUT_FLAG_RESET_BASELINE = 1 shl 1
         private const val CAPTURE_WIDTH = 1920
         private const val CAPTURE_HEIGHT = 1080
         private const val CAPTURE_FPS = 60
         private const val VIDEO_TRACK_ID = "bridge-video-track"
         private const val INPUT_DATA_CHANNEL_LABEL = "input-state"
-        private const val INPUT_PAYLOAD_SIZE = 104
+        private const val INPUT_PAYLOAD_SIZE = 108
         private const val INPUT_TIMEOUT_MS = 300L
         private const val VP8_MIN_BITRATE_KBPS = 6000
         private const val VP8_START_BITRATE_KBPS = 14000
@@ -70,6 +71,8 @@ class WebRtcSessionManager private constructor() {
     private var inputDataChannel: DataChannel? = null
     private var lastInputPacketAtMs: Long = 0L
     private var zeroInputApplied = true
+    @Volatile
+    private var resetInputBaselineOnNextPacket = false
     private val peerLifecycleLock = Any()
 
     fun start(context: Context) {
@@ -281,6 +284,7 @@ class WebRtcSessionManager private constructor() {
                 Log.d(TAG, "Input data channel state: label=${channel.label()} state=$state")
                 if (state == DataChannel.State.OPEN) {
                     lastInputPacketAtMs = System.currentTimeMillis()
+                    resetInputBaselineOnNextPacket = true
                 } else if (state == DataChannel.State.CLOSING || state == DataChannel.State.CLOSED) {
                     applyZeroInput()
                 }
@@ -329,14 +333,20 @@ class WebRtcSessionManager private constructor() {
         val leftGrip = bb.float
         val rightTrigger = bb.float
         val rightGrip = bb.float
-        val yaw = bb.float
-        val pitch = bb.float
-        val roll = bb.float
+        val orientationX = bb.float
+        val orientationY = bb.float
+        val orientationZ = bb.float
+        val orientationW = bb.float
         val hmdPosX = bb.float
         val hmdPosY = bb.float
         val hmdPosZ = bb.float
         val buttons = bb.int
-        val flags = bb.int
+        var flags = bb.int
+        // Reset the native baseline exactly once after the data channel comes back.
+        if (resetInputBaselineOnNextPacket) {
+            flags = flags or INPUT_FLAG_RESET_BASELINE
+            resetInputBaselineOnNextPacket = false
+        }
         val ipdMeters = bb.float
         val hmdVerticalFovDegrees = bb.float
         val leftEyeAngleLeftRadians = bb.float
@@ -362,9 +372,10 @@ class WebRtcSessionManager private constructor() {
             leftGrip,
             rightTrigger,
             rightGrip,
-            yaw,
-            pitch,
-            roll,
+            orientationX,
+            orientationY,
+            orientationZ,
+            orientationW,
             hmdPosX,
             hmdPosY,
             hmdPosZ,
@@ -428,6 +439,7 @@ class WebRtcSessionManager private constructor() {
             0.0f,
             0.0f,
             0.0f,
+            1.0f,
             0.0f,
             0.0f,
             0.0f,
