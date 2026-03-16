@@ -455,83 +455,12 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
         }
 
         item {
-            var signalingTcpPortText by rememberSaveable { mutableStateOf(config.value.signalingTcpPort.toString()) }
-            var streamingWidthText by rememberSaveable { mutableStateOf(config.value.streamingCaptureWidth.toString()) }
-            var streamingHeightText by rememberSaveable { mutableStateOf(config.value.streamingCaptureHeight.toString()) }
-            var streamingFpsText by rememberSaveable { mutableStateOf(config.value.streamingCaptureFps.toString()) }
-            var streamingMinBitrateText by rememberSaveable { mutableStateOf(config.value.streamingMinBitrateKbps.toString()) }
-            var streamingStartBitrateText by rememberSaveable { mutableStateOf(config.value.streamingStartBitrateKbps.toString()) }
-            var streamingMaxBitrateText by rememberSaveable { mutableStateOf(config.value.streamingMaxBitrateKbps.toString()) }
-            val resolutionPresets: List<Pair<String, Pair<Int, Int>>> = remember {
-                listOf(
-                    "1920x1080" to Pair(1920, 1080),
-                    "2560x1440" to Pair(2560, 1440),
-                    "3840x2160" to Pair(3840, 2160)
-                )
-            }
-            val bitratePresets: List<Pair<String, Triple<Int, Int, Int>>> = remember(
-                config.value.streamingCaptureWidth,
-                config.value.streamingCaptureHeight,
-                config.value.streamingCaptureFps
-            ) {
-                when {
-                    config.value.streamingCaptureWidth >= 3840 || config.value.streamingCaptureHeight >= 2160 -> {
-                        listOf(
-                            "Conservative" to Triple(6000, 18000, 28000),
-                            "Balanced" to Triple(8000, 25000, 45000),
-                            "High" to Triple(10000, 32000, 60000)
-                        )
-                    }
-                    config.value.streamingCaptureWidth >= 2560 || config.value.streamingCaptureHeight >= 1440 -> {
-                        listOf(
-                            "Conservative" to Triple(5000, 12000, 18000),
-                            "Balanced" to Triple(6000, 18000, 30000),
-                            "High" to Triple(8000, 24000, 38000)
-                        )
-                    }
-                    else -> {
-                        listOf(
-                            "Conservative" to Triple(4000, 8000, 12000),
-                            "Balanced" to Triple(4000, 12000, 20000),
-                            "High" to Triple(6000, 16000, 28000)
-                        )
-                    }
-                }
-            }
-            var selectedResolutionPresetLabel by rememberSaveable { mutableStateOf("2560x1440") }
-            var selectedBitratePresetLabel by rememberSaveable { mutableStateOf("Balanced") }
-            var streamingScaleResolutionDownByText by rememberSaveable {
-                mutableStateOf(config.value.streamingScaleResolutionDownBy.toString())
-            }
-            var streamingDegradationPreference by rememberSaveable {
-                mutableStateOf(config.value.streamingDegradationPreference)
+            var windowsInputTcpPortText by rememberSaveable {
+                mutableStateOf(config.value.windowsInputTcpPort.toString())
             }
 
-            LaunchedEffect(config.value.signalingTcpPort) {
-                signalingTcpPortText = config.value.signalingTcpPort.toString()
-            }
-            LaunchedEffect(
-                config.value.streamingCaptureWidth,
-                config.value.streamingCaptureHeight,
-                config.value.streamingCaptureFps,
-                config.value.streamingMinBitrateKbps,
-                config.value.streamingStartBitrateKbps,
-                config.value.streamingMaxBitrateKbps,
-                config.value.streamingDegradationPreference,
-                config.value.streamingScaleResolutionDownBy
-            ) {
-                streamingWidthText = config.value.streamingCaptureWidth.toString()
-                streamingHeightText = config.value.streamingCaptureHeight.toString()
-                streamingFpsText = config.value.streamingCaptureFps.toString()
-                streamingMinBitrateText = config.value.streamingMinBitrateKbps.toString()
-                streamingStartBitrateText = config.value.streamingStartBitrateKbps.toString()
-                streamingMaxBitrateText = config.value.streamingMaxBitrateKbps.toString()
-                streamingDegradationPreference = config.value.streamingDegradationPreference
-                streamingScaleResolutionDownByText = config.value.streamingScaleResolutionDownBy.toString()
-                selectedResolutionPresetLabel = resolutionPresets.firstOrNull { preset ->
-                    preset.second.first == config.value.streamingCaptureWidth
-                        && preset.second.second == config.value.streamingCaptureHeight
-                }?.first ?: selectedResolutionPresetLabel
+            LaunchedEffect(config.value.windowsInputTcpPort) {
+                windowsInputTcpPortText = config.value.windowsInputTcpPort.toString()
             }
 
             GakuGroupBox(
@@ -562,258 +491,25 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             GakuTextInput(
-                                value = signalingTcpPortText,
+                                value = windowsInputTcpPortText,
                                 onValueChange = { value ->
-                                    signalingTcpPortText = value
+                                    windowsInputTcpPortText = value
                                 },
                                 modifier = Modifier.width(320.dp),
                                 label = {
-                                    Text(text = "WebRTC signaling TCP port")
+                                    Text(text = "Windows input TCP port")
                                 },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                             )
                             GakuButton(
                                 onClick = {
-                                    context?.onSignalingTcpPortChanged(signalingTcpPortText)
+                                    context?.onWindowsInputTcpPortChanged(windowsInputTcpPortText)
                                 },
                                 text = "Save",
                                 modifier = Modifier
                                     .width(120.dp)
                                     .height(56.dp)
                                     .padding(bottom = 4.dp)
-                            )
-                        }
-
-                        HorizontalDivider(
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                        )
-
-                        Text(
-                            text = "Basic",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Resolution preset",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                GakuSelector(
-                                    options = resolutionPresets.map { it.first to it.first },
-                                    selectedValue = selectedResolutionPresetLabel,
-                                    onValueSelected = { value: String ->
-                                        selectedResolutionPresetLabel = value
-                                        val preset = resolutionPresets.firstOrNull { it.first == value }
-                                        if (preset != null) {
-                                            streamingWidthText = preset.second.first.toString()
-                                            streamingHeightText = preset.second.second.toString()
-                                            context?.onStreamingCaptureResolutionChanged(
-                                                streamingWidthText,
-                                                streamingHeightText
-                                            )
-                                        }
-                                    }
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GakuTextInput(
-                                value = streamingWidthText,
-                                onValueChange = {
-                                    streamingWidthText = it
-                                    context?.onStreamingCaptureResolutionChanged(
-                                        streamingWidthText,
-                                        streamingHeightText
-                                    )
-                                },
-                                modifier = Modifier.width(140.dp),
-                                label = { Text(text = "Width") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                            GakuTextInput(
-                                value = streamingHeightText,
-                                onValueChange = {
-                                    streamingHeightText = it
-                                    context?.onStreamingCaptureResolutionChanged(
-                                        streamingWidthText,
-                                        streamingHeightText
-                                    )
-                                },
-                                modifier = Modifier.width(140.dp),
-                                label = { Text(text = "Height") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GakuTextInput(
-                                value = streamingFpsText,
-                                onValueChange = {
-                                    streamingFpsText = it
-                                    context?.onStreamingCaptureFpsChanged(streamingFpsText)
-                                },
-                                modifier = Modifier.width(140.dp),
-                                label = { Text(text = "Streaming max FPS") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                        }
-
-                        HorizontalDivider(
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                        )
-
-                        Text(
-                            text = "Advanced",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Bitrate preset",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                GakuSelector(
-                                    options = bitratePresets.map { it.first to it.first },
-                                    selectedValue = selectedBitratePresetLabel,
-                                    onValueSelected = { value: String ->
-                                        selectedBitratePresetLabel = value
-                                        val preset = bitratePresets.firstOrNull { it.first == value }
-                                        if (preset != null) {
-                                            streamingMinBitrateText = preset.second.first.toString()
-                                            streamingStartBitrateText = preset.second.second.toString()
-                                            streamingMaxBitrateText = preset.second.third.toString()
-                                            context?.onStreamingBitrateChanged(
-                                                streamingMinBitrateText,
-                                                streamingStartBitrateText,
-                                                streamingMaxBitrateText
-                                            )
-                                        }
-                                    }
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GakuTextInput(
-                                value = streamingMinBitrateText,
-                                onValueChange = {
-                                    streamingMinBitrateText = it
-                                    context?.onStreamingBitrateChanged(
-                                        streamingMinBitrateText,
-                                        streamingStartBitrateText,
-                                        streamingMaxBitrateText
-                                    )
-                                },
-                                modifier = Modifier.width(120.dp),
-                                label = { Text(text = "Min kbps") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                            GakuTextInput(
-                                value = streamingStartBitrateText,
-                                onValueChange = {
-                                    streamingStartBitrateText = it
-                                    context?.onStreamingBitrateChanged(
-                                        streamingMinBitrateText,
-                                        streamingStartBitrateText,
-                                        streamingMaxBitrateText
-                                    )
-                                },
-                                modifier = Modifier.width(120.dp),
-                                label = { Text(text = "Start kbps") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                            GakuTextInput(
-                                value = streamingMaxBitrateText,
-                                onValueChange = {
-                                    streamingMaxBitrateText = it
-                                    context?.onStreamingBitrateChanged(
-                                        streamingMinBitrateText,
-                                        streamingStartBitrateText,
-                                        streamingMaxBitrateText
-                                    )
-                                },
-                                modifier = Modifier.width(120.dp),
-                                label = { Text(text = "Max kbps") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Degradation preference",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                GakuSelector(
-                                    options = listOf(
-                                        "Disabled" to 0,
-                                        "Maintain framerate" to 1,
-                                        "Maintain resolution" to 2,
-                                        "Balanced" to 3
-                                    ),
-                                    selectedValue = streamingDegradationPreference,
-                                    onValueSelected = { value ->
-                                        streamingDegradationPreference = value
-                                        context?.onStreamingDegradationPreferenceChanged(value)
-                                    }
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GakuTextInput(
-                                value = streamingScaleResolutionDownByText,
-                                onValueChange = {
-                                    streamingScaleResolutionDownByText = it
-                                    context?.onStreamingScaleResolutionDownByChanged(streamingScaleResolutionDownByText)
-                                },
-                                modifier = Modifier.width(180.dp),
-                                label = { Text(text = "Scale resolution down by") },
-                                keyboardOptions = keyBoardOptionsDecimal
                             )
                         }
                     }

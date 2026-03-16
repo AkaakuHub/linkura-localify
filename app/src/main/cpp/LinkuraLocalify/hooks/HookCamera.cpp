@@ -1,7 +1,6 @@
 #include "../HookMain.h"
 #include "../config/Config.hpp"
 #include "../camera/camera.hpp"
-#include "../video/StereoVideoBridge.hpp"
 #include "../Misc.hpp"
 #include "../../build/linkura_messages.pb.h"
 #include <EGL/egl.h>
@@ -71,7 +70,7 @@ namespace LinkuraLocal::HookCamera {
             return;
         }
         lastStereoRigActiveNotified = active;
-        setStereoVideoStreamingEnabledFromNative(active);
+        setWindowsInputEnabledFromNative(active);
     }
 
     void applyStereoProjectionMatrices();
@@ -141,8 +140,7 @@ namespace LinkuraLocal::HookCamera {
     }
 
     void updateStereoSourceCamera(UnityResolve::UnityType::Camera* camera) {
-        // Rebuild the right-eye clone when the source camera instance changes,
-        // but keep the WebRTC session alive across the handoff.
+        // Rebuild the right-eye clone when the source camera instance changes.
         if (stereoSourceCameraCache != camera) {
             destroyStereoRightCamera(false);
         }
@@ -858,25 +856,7 @@ namespace LinkuraLocal::HookCamera {
             syncStereoRightEyeFromSourceTransform();
         }
         const bool stereoEnabled = isStereoRequested() && Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache);
-        const bool mainCameraAlive = Il2cppUtils::IsNativeObjectAlive(stereoSourceCameraCache);
-        const bool captureTriggerEnabled = stereoEnabled && mainCameraAlive;
-        const void* rightCaptureCamera = stereoEnabled
-            ? reinterpret_cast<void*>(stereoRightCameraCache)
-            : nullptr;
-        const void* mainCaptureCamera = (stereoEnabled && mainCameraAlive)
-            ? reinterpret_cast<void*>(stereoSourceCameraCache)
-            : nullptr;
-        const bool matchedRightCamera = rightCaptureCamera != nullptr && camera == rightCaptureCamera;
-        const bool matchedMainCamera = mainCaptureCamera != nullptr && camera == mainCaptureCamera;
-        if (captureTriggerEnabled && (matchedRightCamera || matchedMainCamera)) {
-            EndCameraRendering_Orig(ctx, camera, method);
-            LinkuraLocal::StereoVideo::OnEndCameraRendering();
-            return;
-        }
         EndCameraRendering_Orig(ctx, camera, method);
-        if (captureTriggerEnabled) {
-            LinkuraLocal::StereoVideo::OnEndCameraRendering();
-        }
     }
 
     DEFINE_HOOK(
@@ -911,14 +891,6 @@ namespace LinkuraLocal::HookCamera {
 
         return AudienceRenderingAreaManager_SetCamera_Orig(self, camera, patchedSubCamera, method);
     }
-
-    DEFINE_HOOK(EGLBoolean, Probe_eglSwapBuffers, (EGLDisplay display, EGLSurface surface)) {
-        if (eglGetCurrentContext() != EGL_NO_CONTEXT && eglGetCurrentDisplay() != EGL_NO_DISPLAY) {
-            LinkuraLocal::StereoVideo::OnEglSwapBuffers(display, surface);
-        }
-        return Probe_eglSwapBuffers_Orig(display, surface);
-    }
-
     enum CameraType {
         Invalid,
         FixedCamera,
@@ -1538,15 +1510,6 @@ namespace LinkuraLocal::HookCamera {
         );
 
         ADD_HOOK(Unity_Renderer_set_enabled, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Renderer::set_enabled(System.Boolean)"));
-
-        void* eglHandle = xdl_open("libEGL.so", RTLD_NOW);
-        if (eglHandle != nullptr) {
-            auto eglSwapBuffersAddr = xdl_sym(eglHandle, "eglSwapBuffers", nullptr);
-            ADD_HOOK(Probe_eglSwapBuffers, eglSwapBuffersAddr);
-            xdl_close(eglHandle);
-        } else {
-            Log::ErrorFmt("EGL hook install failed: cannot open libEGL.so");
-        }
 #pragma endregion
     }
 }

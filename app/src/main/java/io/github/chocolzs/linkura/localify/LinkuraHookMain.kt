@@ -51,20 +51,11 @@ import kotlinx.serialization.json.Json
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
-import io.github.chocolzs.linkura.localify.ipc.WebRtcStreamingConfig
-import io.github.chocolzs.linkura.localify.ipc.WebRtcSessionManager
+import io.github.chocolzs.linkura.localify.ipc.WindowsInputTcpClient
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
 val TAG = "LinkuraLocalify"
-private const val DEFAULT_SIGNALING_TCP_PORT = 39200
-private const val DEFAULT_STREAMING_CAPTURE_WIDTH = 1920
-private const val DEFAULT_STREAMING_CAPTURE_HEIGHT = 1080
-private const val DEFAULT_STREAMING_CAPTURE_FPS = 60
-private const val DEFAULT_STREAMING_MIN_BITRATE_KBPS = 6000
-private const val DEFAULT_STREAMING_START_BITRATE_KBPS = 14000
-private const val DEFAULT_STREAMING_MAX_BITRATE_KBPS = 28000
-private const val DEFAULT_STREAMING_DEGRADATION_PREFERENCE = 0
-private const val DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY = 1.0
+private const val DEFAULT_WINDOWS_INPUT_TCP_PORT = 39200
 
 class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private lateinit var modulePath: String
@@ -81,16 +72,16 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private var gameActivity: Activity? = null
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
-    private val webRtcSessionManager: WebRtcSessionManager by lazy { WebRtcSessionManager.getInstance() }
+    private val windowsInputTcpClient: WindowsInputTcpClient by lazy { WindowsInputTcpClient() }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
     private var isCameraInfoOverlayEnabled = false
-    private val videoPipelineLock = Any()
-    private var videoPipelineStarted = false
-    private val videoPipelineControlThread: HandlerThread by lazy {
-        HandlerThread("StereoVideoControl").apply { start() }
+    private val windowsInputLock = Any()
+    private var windowsInputStarted = false
+    private val windowsInputControlThread: HandlerThread by lazy {
+        HandlerThread("WindowsInputControl").apply { start() }
     }
-    private val videoPipelineControlHandler: Handler by lazy {
-        Handler(videoPipelineControlThread.looper)
+    private val windowsInputControlHandler: Handler by lazy {
+        Handler(windowsInputControlThread.looper)
     }
     private val jsonCodec = Json {
         encodeDefaults = true
@@ -125,7 +116,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             Log.i(TAG, "AIDL client disconnected from service")
             LogExporter.addLogEntry(TAG, "I", "AIDL client disconnected from service")
             isCameraInfoOverlayEnabled = false
-            setStereoVideoStreamingEnabledAsync(false, "aidlDisconnected")
+            setWindowsInputEnabledAsync(false, "aidlDisconnected")
             
             // Additional disconnection diagnosis
             Log.w(TAG, "=== Disconnection Details ===")
@@ -162,22 +153,10 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         override fun handleMessage(payload: ByteArray): Boolean {
             return try {
                 val configUpdate = ConfigUpdate.parseFrom(payload)
-                if (configUpdate.hasSignalingTcpPort()) {
-                    val signalingPort = sanitizeSignalingTcpPort(configUpdate.signalingTcpPort)
-                    webRtcSessionManager.setSignalingPort(signalingPort)
-                    linkuraConfig?.signalingTcpPort = signalingPort
-                }
-                val currentConfig = linkuraConfig
-                if (currentConfig != null) {
-                    if (configUpdate.hasStreamingCaptureWidth()) currentConfig.streamingCaptureWidth = configUpdate.streamingCaptureWidth
-                    if (configUpdate.hasStreamingCaptureHeight()) currentConfig.streamingCaptureHeight = configUpdate.streamingCaptureHeight
-                    if (configUpdate.hasStreamingCaptureFps()) currentConfig.streamingCaptureFps = configUpdate.streamingCaptureFps
-                    if (configUpdate.hasStreamingMinBitrateKbps()) currentConfig.streamingMinBitrateKbps = configUpdate.streamingMinBitrateKbps
-                    if (configUpdate.hasStreamingStartBitrateKbps()) currentConfig.streamingStartBitrateKbps = configUpdate.streamingStartBitrateKbps
-                    if (configUpdate.hasStreamingMaxBitrateKbps()) currentConfig.streamingMaxBitrateKbps = configUpdate.streamingMaxBitrateKbps
-                    if (configUpdate.hasStreamingDegradationPreference()) currentConfig.streamingDegradationPreference = configUpdate.streamingDegradationPreference
-                    if (configUpdate.hasStreamingScaleResolutionDownBy()) currentConfig.streamingScaleResolutionDownBy = configUpdate.streamingScaleResolutionDownBy
-                    webRtcSessionManager.setStreamingConfig(buildStreamingConfig(currentConfig))
+                if (configUpdate.hasWindowsInputTcpPort()) {
+                    val inputPort = sanitizeWindowsInputTcpPort(configUpdate.windowsInputTcpPort)
+                    windowsInputTcpClient.setPort(inputPort)
+                    linkuraConfig?.windowsInputTcpPort = inputPort
                 }
                 updateConfig(payload)
                 Log.i(TAG, "Config update sent to native layer")
@@ -757,39 +736,33 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
     }
 
-    private fun setStereoVideoStreamingEnabledAsync(enabled: Boolean, reason: String) {
-        videoPipelineControlHandler.post {
-            setStereoVideoStreamingEnabledInternal(enabled, reason)
+    private fun setWindowsInputEnabledAsync(enabled: Boolean, reason: String) {
+        windowsInputControlHandler.post {
+            setWindowsInputEnabledInternal(enabled, reason)
         }
     }
 
-    private fun setStereoVideoStreamingEnabledInternal(enabled: Boolean, reason: String) {
-        synchronized(videoPipelineLock) {
+    private fun setWindowsInputEnabledInternal(enabled: Boolean, reason: String) {
+        synchronized(windowsInputLock) {
             if (enabled) {
-                if (videoPipelineStarted) {
+                if (windowsInputStarted) {
                     return
                 }
-                val context = AndroidAppHelper.currentApplication()?.applicationContext
-                if (context == null) {
-                    Log.w(TAG, "WebRTC session start failed: no application context, reason=$reason")
-                    LogExporter.addLogEntry(TAG, "W", "WebRTC session start failed: no application context, reason=$reason")
-                    return
-                }
-                webRtcSessionManager.start(context)
-                videoPipelineStarted = true
-                Log.i(TAG, "WebRTC session started: reason=$reason")
-                LogExporter.addLogEntry(TAG, "I", "WebRTC session started: reason=$reason")
+                windowsInputTcpClient.start()
+                windowsInputStarted = true
+                Log.i(TAG, "Windows input TCP started: reason=$reason")
+                LogExporter.addLogEntry(TAG, "I", "Windows input TCP started: reason=$reason")
                 return
             }
 
-            if (!videoPipelineStarted) {
+            if (!windowsInputStarted) {
                 return
             }
 
-            webRtcSessionManager.stop()
-            videoPipelineStarted = false
-            Log.i(TAG, "WebRTC session stopped: reason=$reason")
-            LogExporter.addLogEntry(TAG, "I", "WebRTC session stopped: reason=$reason")
+            windowsInputTcpClient.stop()
+            windowsInputStarted = false
+            Log.i(TAG, "Windows input TCP stopped: reason=$reason")
+            LogExporter.addLogEntry(TAG, "I", "Windows input TCP stopped: reason=$reason")
         }
     }
 
@@ -889,7 +862,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             diagnosePotentialConnectionIssues(context)
         }
 
-        setStereoVideoStreamingEnabledAsync(false, "init")
+        setWindowsInputEnabledAsync(false, "init")
         
         Log.i(TAG, "=== AIDL Client Setup Diagnosis Complete ===")
     }
@@ -952,10 +925,9 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             }
             // Store the config for later access
             linkuraConfig = initConfig
-            webRtcSessionManager.setSignalingPort(
-                sanitizeSignalingTcpPort(initConfig?.signalingTcpPort ?: DEFAULT_SIGNALING_TCP_PORT)
+            windowsInputTcpClient.setPort(
+                sanitizeWindowsInputTcpPort(initConfig?.windowsInputTcpPort ?: DEFAULT_WINDOWS_INPUT_TCP_PORT)
             )
-            webRtcSessionManager.setStreamingConfig(buildStreamingConfig(initConfig))
             val programConfig = try {
                 if (programData == null) {
                     ProgramConfig()
@@ -1021,47 +993,12 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
     }
 
-    private fun sanitizeSignalingTcpPort(value: Int): Int {
+    private fun sanitizeWindowsInputTcpPort(value: Int): Int {
         return if (value in 1..65535) {
             value
         } else {
-            DEFAULT_SIGNALING_TCP_PORT
+            DEFAULT_WINDOWS_INPUT_TCP_PORT
         }
-    }
-
-    private fun buildStreamingConfig(config: LinkuraConfig?): WebRtcStreamingConfig {
-        return WebRtcStreamingConfig(
-            captureWidth = sanitizeStreamingCaptureDimension(config?.streamingCaptureWidth, DEFAULT_STREAMING_CAPTURE_WIDTH),
-            captureHeight = sanitizeStreamingCaptureDimension(config?.streamingCaptureHeight, DEFAULT_STREAMING_CAPTURE_HEIGHT),
-            captureFps = sanitizeStreamingCaptureFps(config?.streamingCaptureFps),
-            minBitrateKbps = sanitizeStreamingBitrate(config?.streamingMinBitrateKbps, DEFAULT_STREAMING_MIN_BITRATE_KBPS),
-            startBitrateKbps = sanitizeStreamingBitrate(config?.streamingStartBitrateKbps, DEFAULT_STREAMING_START_BITRATE_KBPS),
-            maxBitrateKbps = sanitizeStreamingBitrate(config?.streamingMaxBitrateKbps, DEFAULT_STREAMING_MAX_BITRATE_KBPS),
-            degradationPreference = sanitizeStreamingDegradationPreference(config?.streamingDegradationPreference),
-            scaleResolutionDownBy = sanitizeStreamingScaleResolutionDownBy(config?.streamingScaleResolutionDownBy)
-        )
-    }
-
-    private fun sanitizeStreamingCaptureDimension(value: Int?, defaultValue: Int): Int {
-        val sanitized = if (value != null && value in 256..7680) value else defaultValue
-        return if (sanitized % 2 == 0) sanitized else sanitized - 1
-    }
-
-    private fun sanitizeStreamingCaptureFps(value: Int?): Int {
-        return if (value != null && value in 1..120) value else DEFAULT_STREAMING_CAPTURE_FPS
-    }
-
-    private fun sanitizeStreamingBitrate(value: Int?, defaultValue: Int): Int {
-        return if (value != null && value in 100..200000) value else defaultValue
-    }
-
-    private fun sanitizeStreamingDegradationPreference(value: Int?): Int {
-        return if (value != null && value in 0..3) value else DEFAULT_STREAMING_DEGRADATION_PREFERENCE
-    }
-
-    private fun sanitizeStreamingScaleResolutionDownBy(value: Float?): Double {
-        val normalized = value?.toDouble() ?: DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY
-        return if (normalized in 1.0..4.0) normalized else DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY
     }
 
     private fun processClientResourceData(clientResData: String, currentVersionName: String) {
@@ -1322,15 +1259,13 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             rightEyeAngleDownRadians: Float
         )
         @JvmStatic
-        external fun setVideoEncoderSurface(surface: android.view.Surface?, width: Int, height: Int): Boolean
-        @JvmStatic
-        fun setStereoVideoStreamingEnabledFromNative(enabled: Boolean) {
+        fun setWindowsInputEnabledFromNative(enabled: Boolean) {
             val instance = activeHookMainInstance
             if (instance == null) {
-                Log.w(TAG, "setStereoVideoStreamingEnabledFromNative ignored: no active instance")
+                Log.w(TAG, "setWindowsInputEnabledFromNative ignored: no active instance")
                 return
             }
-            instance.setStereoVideoStreamingEnabledAsync(enabled, "nativeStereoRigSync")
+            instance.setWindowsInputEnabledAsync(enabled, "nativeStereoRigSync")
         }
         @JvmStatic
         external fun loadConfig(configJsonStr: String)

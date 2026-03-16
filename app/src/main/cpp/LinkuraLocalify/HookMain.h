@@ -99,8 +99,3 @@ namespace LinkuraLocal::HookShare {
 namespace LinkuraLocal::HookTranslation {
     void Install(HookInstaller *hookInstaller);
 }
-
-namespace LinkuraLocal::StereoVideo {
-    bool SetEncoderSurface(JNIEnv* env, jobject surface, int width, int height);
-    void OnEndCameraRendering();
-}

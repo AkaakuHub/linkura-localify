@@ -17,5 +17,5 @@ void pauseCameraInfoLoopFromNative(long delayMillis);
 // This is a convenience overload that uses the default delay
 void pauseCameraInfoLoopFromNative();
 
-// Toggle stereo video pipeline from native side.
-void setStereoVideoStreamingEnabledFromNative(bool enabled);
+// Toggle Windows input pipeline from native side.
+void setWindowsInputEnabledFromNative(bool enabled);
