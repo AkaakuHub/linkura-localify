@@ -113,6 +113,14 @@ message ConfigUpdate {
   optional string story_replace_content = 46;
   optional bool memorize_free_camera_pos = 47;
   optional int32 signaling_tcp_port = 48;
+  optional int32 streaming_capture_width = 50;
+  optional int32 streaming_capture_height = 51;
+  optional int32 streaming_capture_fps = 52;
+  optional int32 streaming_min_bitrate_kbps = 53;
+  optional int32 streaming_start_bitrate_kbps = 54;
+  optional int32 streaming_max_bitrate_kbps = 55;
+  optional int32 streaming_degradation_preference = 56;
+  optional float streaming_scale_resolution_down_by = 57;
 }
 
 // Overlay control actions

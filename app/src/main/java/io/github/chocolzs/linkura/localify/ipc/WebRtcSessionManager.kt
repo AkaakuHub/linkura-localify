@@ -27,22 +27,34 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
+data class WebRtcStreamingConfig(
+    val captureWidth: Int,
+    val captureHeight: Int,
+    val captureFps: Int,
+    val minBitrateKbps: Int,
+    val startBitrateKbps: Int,
+    val maxBitrateKbps: Int,
+    val degradationPreference: Int,
+    val scaleResolutionDownBy: Double
+)
+
 class WebRtcSessionManager private constructor() {
     companion object {
         private const val TAG = "WebRtcSessionManager"
         private const val DEFAULT_SIGNALING_PORT = 39200
         private const val INPUT_FLAG_RESET_BASELINE = 1 shl 1
-        private const val CAPTURE_WIDTH = 1920
-        private const val CAPTURE_HEIGHT = 1080
-        private const val CAPTURE_FPS = 60
+        private const val DEFAULT_CAPTURE_WIDTH = 1920
+        private const val DEFAULT_CAPTURE_HEIGHT = 1080
+        private const val DEFAULT_CAPTURE_FPS = 60
         private const val VIDEO_TRACK_ID = "bridge-video-track"
         private const val INPUT_DATA_CHANNEL_LABEL = "input-state"
         private const val INPUT_PAYLOAD_SIZE = 108
         private const val INPUT_TIMEOUT_MS = 300L
-        private const val VP8_MIN_BITRATE_KBPS = 6000
-        private const val VP8_START_BITRATE_KBPS = 14000
-        private const val VP8_MAX_BITRATE_KBPS = 28000
-        private const val VP8_MAX_FRAMERATE = 60
+        private const val DEFAULT_MIN_BITRATE_KBPS = 6000
+        private const val DEFAULT_START_BITRATE_KBPS = 14000
+        private const val DEFAULT_MAX_BITRATE_KBPS = 28000
+        private const val DEFAULT_DEGRADATION_PREFERENCE = 0
+        private const val DEFAULT_SCALE_RESOLUTION_DOWN_BY = 1.0
 
         @Volatile
         private var INSTANCE: WebRtcSessionManager? = null
@@ -74,6 +86,9 @@ class WebRtcSessionManager private constructor() {
     @Volatile
     private var resetInputBaselineOnNextPacket = false
     private val peerLifecycleLock = Any()
+    @Volatile
+    private var streamingConfig = defaultStreamingConfig()
+    private var videoSender: org.webrtc.RtpSender? = null
 
     fun start(context: Context) {
         if (!started.compareAndSet(false, true)) {
@@ -118,6 +133,36 @@ class WebRtcSessionManager private constructor() {
         signalingClient.setPort(sanitizedPort)
         if (started.get()) {
             signalingClient.restart()
+        }
+    }
+
+    fun setStreamingConfig(config: WebRtcStreamingConfig) {
+        val sanitizedConfig = sanitizeStreamingConfig(config)
+        val previousConfig = streamingConfig
+        if (previousConfig == sanitizedConfig) {
+            return
+        }
+
+        streamingConfig = sanitizedConfig
+        if (!started.get()) {
+            return
+        }
+
+        val captureChanged = previousConfig.captureWidth != sanitizedConfig.captureWidth
+            || previousConfig.captureHeight != sanitizedConfig.captureHeight
+            || previousConfig.captureFps != sanitizedConfig.captureFps
+
+        val shouldCreateOffer: Boolean
+        synchronized(peerLifecycleLock) {
+            if (captureChanged) {
+                rebuildPeerConnectionLocked()
+            } else {
+                videoSender?.let { applyVideoSenderParameters(it) }
+            }
+            shouldCreateOffer = signalingClient.isConnected()
+        }
+        if (shouldCreateOffer) {
+            createOffer()
         }
     }
 
@@ -256,6 +301,7 @@ class WebRtcSessionManager private constructor() {
         } catch (_: Exception) {
         }
         peerConnection = null
+        videoSender = null
     }
 
     private fun createInputDataChannel(activePeerConnection: PeerConnection) {
@@ -484,13 +530,18 @@ class WebRtcSessionManager private constructor() {
         }
         videoCapturer = capturer
         capturer.initialize(helper, context, source.capturerObserver)
-        capturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS)
+        val activeStreamingConfig = streamingConfig
+        capturer.startCapture(
+            activeStreamingConfig.captureWidth,
+            activeStreamingConfig.captureHeight,
+            activeStreamingConfig.captureFps
+        )
         val track = activeFactory.createVideoTrack(VIDEO_TRACK_ID, source)
         videoTrack = track
         val sender = activePeerConnection.addTrack(track)
+        videoSender = sender
         applyVideoCodecPreference(activePeerConnection)
         applyVideoSenderParameters(sender)
-        Log.i(TAG, "WebRTC video track started: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}@${CAPTURE_FPS}")
         Log.i(TAG, "WebRTC video sender created: id=${sender.id()}")
     }
 
@@ -511,6 +562,7 @@ class WebRtcSessionManager private constructor() {
         } catch (_: Exception) {
         }
         videoTrack = null
+        videoSender = null
 
         try {
             videoSource?.dispose()
@@ -639,19 +691,18 @@ class WebRtcSessionManager private constructor() {
                 Log.w(TAG, "Sender parameters skipped: encoding list is empty")
                 return
             }
+            val activeStreamingConfig = streamingConfig
             for (encoding in encodings) {
-                encoding.maxBitrateBps = VP8_MAX_BITRATE_KBPS * 1000
-                encoding.minBitrateBps = VP8_MIN_BITRATE_KBPS * 1000
-                encoding.maxFramerate = VP8_MAX_FRAMERATE
+                encoding.maxBitrateBps = activeStreamingConfig.maxBitrateKbps * 1000
+                encoding.minBitrateBps = activeStreamingConfig.minBitrateKbps * 1000
+                encoding.maxFramerate = activeStreamingConfig.captureFps
+                encoding.scaleResolutionDownBy = activeStreamingConfig.scaleResolutionDownBy
             }
+            parameters.degradationPreference = mapDegradationPreference(activeStreamingConfig.degradationPreference)
             if (!sender.setParameters(parameters)) {
                 Log.w(TAG, "Failed to apply sender bitrate parameters")
                 return
             }
-            Log.d(
-                TAG,
-                "Applied sender bitrate parameters: min=${VP8_MIN_BITRATE_KBPS}kbps start=${VP8_START_BITRATE_KBPS}kbps max=${VP8_MAX_BITRATE_KBPS}kbps maxFps=$VP8_MAX_FRAMERATE"
-            )
         } catch (e: Exception) {
             Log.e(TAG, "applyVideoSenderParameters failed", e)
         }
@@ -669,8 +720,9 @@ class WebRtcSessionManager private constructor() {
             ?.trim()
             ?: return sdp
 
+        val activeStreamingConfig = streamingConfig
         val fmtpLine =
-            "a=fmtp:$vp8PayloadType x-google-min-bitrate=$VP8_MIN_BITRATE_KBPS;x-google-start-bitrate=$VP8_START_BITRATE_KBPS;x-google-max-bitrate=$VP8_MAX_BITRATE_KBPS"
+            "a=fmtp:$vp8PayloadType x-google-min-bitrate=${activeStreamingConfig.minBitrateKbps};x-google-start-bitrate=${activeStreamingConfig.startBitrateKbps};x-google-max-bitrate=${activeStreamingConfig.maxBitrateKbps}"
         val nackLine = "a=rtcp-fb:$vp8PayloadType nack"
         val pliLine = "a=rtcp-fb:$vp8PayloadType nack pli"
 
@@ -756,6 +808,75 @@ class WebRtcSessionManager private constructor() {
 
         override fun onSetFailure(error: String) {
             Log.e(TAG, "$action set failure: $error")
+        }
+    }
+
+    private fun rebuildPeerConnectionLocked() {
+        teardownPeerConnectionLocked()
+        buildPeerConnectionLocked()
+    }
+
+    private fun defaultStreamingConfig(): WebRtcStreamingConfig {
+        return WebRtcStreamingConfig(
+            captureWidth = DEFAULT_CAPTURE_WIDTH,
+            captureHeight = DEFAULT_CAPTURE_HEIGHT,
+            captureFps = DEFAULT_CAPTURE_FPS,
+            minBitrateKbps = DEFAULT_MIN_BITRATE_KBPS,
+            startBitrateKbps = DEFAULT_START_BITRATE_KBPS,
+            maxBitrateKbps = DEFAULT_MAX_BITRATE_KBPS,
+            degradationPreference = DEFAULT_DEGRADATION_PREFERENCE,
+            scaleResolutionDownBy = DEFAULT_SCALE_RESOLUTION_DOWN_BY
+        )
+    }
+
+    private fun sanitizeStreamingConfig(config: WebRtcStreamingConfig): WebRtcStreamingConfig {
+        val captureWidth = sanitizeCaptureDimension(config.captureWidth, DEFAULT_CAPTURE_WIDTH)
+        val captureHeight = sanitizeCaptureDimension(config.captureHeight, DEFAULT_CAPTURE_HEIGHT)
+        val captureFps = if (config.captureFps in 1..120) config.captureFps else DEFAULT_CAPTURE_FPS
+        val minBitrateKbps = sanitizeBitrate(config.minBitrateKbps, DEFAULT_MIN_BITRATE_KBPS)
+        val startBitrateKbps = sanitizeBitrate(config.startBitrateKbps, DEFAULT_START_BITRATE_KBPS)
+        val maxBitrateKbps = sanitizeBitrate(config.maxBitrateKbps, DEFAULT_MAX_BITRATE_KBPS)
+        val normalizedMinBitrateKbps = minBitrateKbps.coerceAtMost(startBitrateKbps).coerceAtMost(maxBitrateKbps)
+        val normalizedStartBitrateKbps = startBitrateKbps.coerceAtLeast(normalizedMinBitrateKbps).coerceAtMost(maxBitrateKbps)
+        val normalizedMaxBitrateKbps = maxBitrateKbps.coerceAtLeast(normalizedStartBitrateKbps)
+        val degradationPreference = if (config.degradationPreference in 0..3) {
+            config.degradationPreference
+        } else {
+            DEFAULT_DEGRADATION_PREFERENCE
+        }
+        val scaleResolutionDownBy = if (config.scaleResolutionDownBy in 1.0..4.0) {
+            config.scaleResolutionDownBy
+        } else {
+            DEFAULT_SCALE_RESOLUTION_DOWN_BY
+        }
+
+        return WebRtcStreamingConfig(
+            captureWidth = captureWidth,
+            captureHeight = captureHeight,
+            captureFps = captureFps,
+            minBitrateKbps = normalizedMinBitrateKbps,
+            startBitrateKbps = normalizedStartBitrateKbps,
+            maxBitrateKbps = normalizedMaxBitrateKbps,
+            degradationPreference = degradationPreference,
+            scaleResolutionDownBy = scaleResolutionDownBy
+        )
+    }
+
+    private fun sanitizeCaptureDimension(value: Int, defaultValue: Int): Int {
+        val sanitized = if (value in 256..7680) value else defaultValue
+        return if (sanitized % 2 == 0) sanitized else sanitized - 1
+    }
+
+    private fun sanitizeBitrate(value: Int, defaultValue: Int): Int {
+        return if (value in 100..200000) value else defaultValue
+    }
+
+    private fun mapDegradationPreference(value: Int): org.webrtc.RtpParameters.DegradationPreference {
+        return when (value) {
+            1 -> org.webrtc.RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+            2 -> org.webrtc.RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+            3 -> org.webrtc.RtpParameters.DegradationPreference.BALANCED
+            else -> org.webrtc.RtpParameters.DegradationPreference.DISABLED
         }
     }
 }

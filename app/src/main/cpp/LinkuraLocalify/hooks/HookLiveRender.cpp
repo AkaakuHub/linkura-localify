@@ -11,6 +11,12 @@ namespace LinkuraLocal::HookLiveRender {
         bool isPlaying = false;
     }
 
+    enum struct SchoolResolution_LiveAreaQuality {
+        Low,
+        Middle,
+        High
+    };
+
     namespace {
         constexpr int kMinStreamingFps = 60;
         constexpr int kNoVSync = 0;
@@ -69,12 +75,6 @@ namespace LinkuraLocal::HookLiveRender {
             set_height->Invoke<void>(targetTexture, newHeight);
         }
     }
-
-    enum struct SchoolResolution_LiveAreaQuality {
-        Low,
-        Middle,
-        High
-    };
 
     DEFINE_HOOK(void* , RealtimeRenderingArchiveController_SetPlayPositionAsync, (void* self, float seconds)) {
         Log::DebugFmt("RealtimeRenderingArchiveController_SetPlayPositionAsync HOOKED: seconds is %f", seconds);

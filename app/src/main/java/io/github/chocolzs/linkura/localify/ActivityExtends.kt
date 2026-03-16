@@ -13,6 +13,14 @@ import kotlinx.serialization.SerializationException
 import java.io.File
 
 private const val DEFAULT_SIGNALING_TCP_PORT = 39200
+private const val DEFAULT_STREAMING_CAPTURE_WIDTH = 1920
+private const val DEFAULT_STREAMING_CAPTURE_HEIGHT = 1080
+private const val DEFAULT_STREAMING_CAPTURE_FPS = 60
+private const val DEFAULT_STREAMING_MIN_BITRATE_KBPS = 6000
+private const val DEFAULT_STREAMING_START_BITRATE_KBPS = 14000
+private const val DEFAULT_STREAMING_MAX_BITRATE_KBPS = 28000
+private const val DEFAULT_STREAMING_DEGRADATION_PREFERENCE = 0
+private const val DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY = 1.0f
 
 private fun sanitizeSignalingTcpPort(value: Int): Int {
     return if (value in 1..65535) {
@@ -20,6 +28,58 @@ private fun sanitizeSignalingTcpPort(value: Int): Int {
     } else {
         DEFAULT_SIGNALING_TCP_PORT
     }
+}
+
+private fun sanitizeStreamingCaptureDimension(value: Int, defaultValue: Int): Int {
+    val sanitized = if (value in 256..7680) value else defaultValue
+    return if (sanitized % 2 == 0) sanitized else sanitized - 1
+}
+
+private fun sanitizeStreamingFps(value: Int): Int {
+    return if (value in 1..120) value else DEFAULT_STREAMING_CAPTURE_FPS
+}
+
+private fun sanitizeStreamingBitrateKbps(value: Int, defaultValue: Int): Int {
+    return if (value in 100..200000) value else defaultValue
+}
+
+private fun sanitizeStreamingDegradationPreference(value: Int): Int {
+    return if (value in 0..3) value else DEFAULT_STREAMING_DEGRADATION_PREFERENCE
+}
+
+private fun sanitizeStreamingScaleResolutionDownBy(value: Float): Float {
+    return if (value in 1.0f..4.0f) value else DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY
+}
+
+private fun sanitizeStreamingConfig(config: LinkuraConfig) {
+    config.streamingCaptureWidth = sanitizeStreamingCaptureDimension(
+        config.streamingCaptureWidth,
+        DEFAULT_STREAMING_CAPTURE_WIDTH
+    )
+    config.streamingCaptureHeight = sanitizeStreamingCaptureDimension(
+        config.streamingCaptureHeight,
+        DEFAULT_STREAMING_CAPTURE_HEIGHT
+    )
+    config.streamingCaptureFps = sanitizeStreamingFps(config.streamingCaptureFps)
+
+    val minBitrate = sanitizeStreamingBitrateKbps(
+        config.streamingMinBitrateKbps,
+        DEFAULT_STREAMING_MIN_BITRATE_KBPS
+    )
+    val startBitrate = sanitizeStreamingBitrateKbps(
+        config.streamingStartBitrateKbps,
+        DEFAULT_STREAMING_START_BITRATE_KBPS
+    )
+    val maxBitrate = sanitizeStreamingBitrateKbps(
+        config.streamingMaxBitrateKbps,
+        DEFAULT_STREAMING_MAX_BITRATE_KBPS
+    )
+
+    config.streamingMinBitrateKbps = minBitrate.coerceAtMost(startBitrate).coerceAtMost(maxBitrate)
+    config.streamingStartBitrateKbps = startBitrate.coerceAtLeast(config.streamingMinBitrateKbps).coerceAtMost(maxBitrate)
+    config.streamingMaxBitrateKbps = maxBitrate.coerceAtLeast(config.streamingStartBitrateKbps)
+    config.streamingDegradationPreference = sanitizeStreamingDegradationPreference(config.streamingDegradationPreference)
+    config.streamingScaleResolutionDownBy = sanitizeStreamingScaleResolutionDownBy(config.streamingScaleResolutionDownBy)
 }
 
 interface IHasConfigItems {
@@ -95,6 +155,7 @@ fun <T> T.loadConfig() where T : Activity, T : IHasConfigItems {
         LinkuraConfig()
     }
     config.signalingTcpPort = sanitizeSignalingTcpPort(config.signalingTcpPort)
+    sanitizeStreamingConfig(config)
     saveConfig()
 
     val programConfigStr = getProgramConfigContent()

@@ -63,6 +63,11 @@ interface ConfigListener {
     fun onAssetsUrlPrefixChanged(value: String)
     fun onEnableVrChanged(value: Boolean)
     fun onSignalingTcpPortChanged(value: String)
+    fun onStreamingCaptureResolutionChanged(widthValue: String, heightValue: String)
+    fun onStreamingCaptureFpsChanged(value: String)
+    fun onStreamingBitrateChanged(minValue: String, startValue: String, maxValue: String)
+    fun onStreamingDegradationPreferenceChanged(value: Int)
+    fun onStreamingScaleResolutionDownByChanged(value: String)
     fun onHideCharacterShadowChanged(value: Boolean)
     fun onHideLiveStreamSceneItemsLevel(value: Int)
     fun onHideLiveStreamCharacterItems(value: Boolean)
@@ -433,6 +438,69 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         }
 
         config.signalingTcpPort = port
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onStreamingCaptureResolutionChanged(widthValue: String, heightValue: String) {
+        val width = widthValue.trim().toIntOrNull() ?: return
+        val height = heightValue.trim().toIntOrNull() ?: return
+        if (width !in 256..7680 || height !in 256..7680) {
+            return
+        }
+
+        config.streamingCaptureWidth = if (width % 2 == 0) width else width - 1
+        config.streamingCaptureHeight = if (height % 2 == 0) height else height - 1
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onStreamingCaptureFpsChanged(value: String) {
+        val fps = value.trim().toIntOrNull() ?: return
+        if (fps !in 1..120) {
+            return
+        }
+
+        config.streamingCaptureFps = fps
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onStreamingBitrateChanged(minValue: String, startValue: String, maxValue: String) {
+        val minBitrate = minValue.trim().toIntOrNull() ?: return
+        val startBitrate = startValue.trim().toIntOrNull() ?: return
+        val maxBitrate = maxValue.trim().toIntOrNull() ?: return
+        if (minBitrate !in 100..200000 || startBitrate !in 100..200000 || maxBitrate !in 100..200000) {
+            return
+        }
+        if (!(minBitrate <= startBitrate && startBitrate <= maxBitrate)) {
+            return
+        }
+
+        config.streamingMinBitrateKbps = minBitrate
+        config.streamingStartBitrateKbps = startBitrate
+        config.streamingMaxBitrateKbps = maxBitrate
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onStreamingDegradationPreferenceChanged(value: Int) {
+        if (value !in 0..3) {
+            return
+        }
+
+        config.streamingDegradationPreference = value
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onStreamingScaleResolutionDownByChanged(value: String) {
+        val scale = value.trim().toFloatOrNull() ?: return
+        if (scale !in 1.0f..4.0f) {
+            return
+        }
+
+        config.streamingScaleResolutionDownBy = scale
         saveConfig()
         sendConfigUpdate(config)
     }

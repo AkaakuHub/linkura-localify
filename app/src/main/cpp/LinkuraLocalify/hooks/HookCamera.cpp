@@ -91,7 +91,7 @@ namespace LinkuraLocal::HookCamera {
         }
     }
 
-    void destroyStereoRightCamera() {
+    void destroyStereoRightCamera(bool notifyInactive = true) {
         if (Il2cppUtils::IsNativeObjectAlive(stereoRightCameraCache)) {
             static auto Object_klass = Il2cppUtils::GetClass("UnityEngine.CoreModule.dll", "UnityEngine", "Object");
             static auto destroy = Object_klass->Get<UnityResolve::Method>("Destroy", { "*" });
@@ -100,7 +100,9 @@ namespace LinkuraLocal::HookCamera {
         stereoRightCameraCache = nullptr;
         stereoRightTransformCache = nullptr;
         applyStereoRects(false);
-        notifyStereoRigState(false);
+        if (notifyInactive) {
+            notifyStereoRigState(false);
+        }
     }
 
     void ensureStereoRig() {
@@ -139,9 +141,10 @@ namespace LinkuraLocal::HookCamera {
     }
 
     void updateStereoSourceCamera(UnityResolve::UnityType::Camera* camera) {
-        // Rebuild the right-eye clone whenever the source camera instance changes.
+        // Rebuild the right-eye clone when the source camera instance changes,
+        // but keep the WebRTC session alive across the handoff.
         if (stereoSourceCameraCache != camera) {
-            destroyStereoRightCamera();
+            destroyStereoRightCamera(false);
         }
         stereoSourceCameraCache = camera;
         stereoSourceTransformCache = stereoSourceCameraCache ? stereoSourceCameraCache->GetTransform() : nullptr;

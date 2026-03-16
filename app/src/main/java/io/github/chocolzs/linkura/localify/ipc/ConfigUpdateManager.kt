@@ -72,6 +72,14 @@ class ConfigUpdateManager private constructor() {
                 if (config.assetsUrlPrefix != null) assetsUrlPrefix = config.assetsUrlPrefix
                 if (config.enableVr != null) enableVr = config.enableVr
                 if (config.signalingTcpPort != null) signalingTcpPort = config.signalingTcpPort
+                if (config.streamingCaptureWidth != null) streamingCaptureWidth = config.streamingCaptureWidth
+                if (config.streamingCaptureHeight != null) streamingCaptureHeight = config.streamingCaptureHeight
+                if (config.streamingCaptureFps != null) streamingCaptureFps = config.streamingCaptureFps
+                if (config.streamingMinBitrateKbps != null) streamingMinBitrateKbps = config.streamingMinBitrateKbps
+                if (config.streamingStartBitrateKbps != null) streamingStartBitrateKbps = config.streamingStartBitrateKbps
+                if (config.streamingMaxBitrateKbps != null) streamingMaxBitrateKbps = config.streamingMaxBitrateKbps
+                if (config.streamingDegradationPreference != null) streamingDegradationPreference = config.streamingDegradationPreference
+                if (config.streamingScaleResolutionDownBy != null) streamingScaleResolutionDownBy = config.streamingScaleResolutionDownBy
                 if (config.hideCharacterShadow != null) hideCharacterShadow = config.hideCharacterShadow
                 if (config.hideLiveStreamSceneItemsLevel != null) hideLiveStreamSceneItemsLevel = config.hideLiveStreamSceneItemsLevel
                 if (config.hideLiveStreamCharacterItems != null) hideLiveStreamCharacterItems = config.hideLiveStreamCharacterItems

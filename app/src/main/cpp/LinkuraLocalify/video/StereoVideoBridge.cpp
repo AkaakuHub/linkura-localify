@@ -1,12 +1,14 @@
 #include "StereoVideoBridge.hpp"
 
 #include <android/log.h>
+#include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -92,9 +94,12 @@ namespace {
             precision mediump float;
             in vec2 vTex;
             uniform sampler2D uTex;
+            uniform vec2 uTexScale;
+            uniform vec2 uTexOffset;
             out vec4 fragColor;
             void main() {
-                fragColor = texture(uTex, vTex);
+                vec2 sampledTexCoord = uTexOffset + (vTex * uTexScale);
+                fragColor = texture(uTex, sampledTexCoord);
             }
         )";
 
@@ -242,6 +247,22 @@ namespace LinkuraLocal::StereoVideo {
                 g_state.surfaceDirty = true;
                 return false;
             }
+            const int geometryResult = ANativeWindow_setBuffersGeometry(
+                g_state.window,
+                width,
+                height,
+                WINDOW_FORMAT_RGBA_8888
+            );
+            if (geometryResult != 0) {
+                __android_log_print(
+                    ANDROID_LOG_ERROR,
+                    kLogTag,
+                    "ANativeWindow_setBuffersGeometry failed: result=%d requested=%dx%d",
+                    geometryResult,
+                    width,
+                    height
+                );
+            }
             g_state.targetWidth = width;
             g_state.targetHeight = height;
             __android_log_print(ANDROID_LOG_DEBUG, kLogTag, "Encoder surface set: %dx%d", width, height);
@@ -314,6 +335,38 @@ namespace LinkuraLocal::StereoVideo {
             return;
         }
 
+        EGLint encoderSurfaceWidth = 0;
+        EGLint encoderSurfaceHeight = 0;
+        if (eglQuerySurface(display, g_state.eglSurface, EGL_WIDTH, &encoderSurfaceWidth) != EGL_TRUE ||
+            eglQuerySurface(display, g_state.eglSurface, EGL_HEIGHT, &encoderSurfaceHeight) != EGL_TRUE ||
+            encoderSurfaceWidth <= 0 || encoderSurfaceHeight <= 0) {
+            return;
+        }
+
+        if (encoderSurfaceWidth != g_state.targetWidth || encoderSurfaceHeight != g_state.targetHeight) {
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "Encoder surface size mismatch: surface=%dx%d target=%dx%d draw=%dx%d",
+                encoderSurfaceWidth,
+                encoderSurfaceHeight,
+                g_state.targetWidth,
+                g_state.targetHeight,
+                drawWidth,
+                drawHeight
+            );
+            if (g_state.window != nullptr) {
+                ANativeWindow_setBuffersGeometry(
+                    g_state.window,
+                    g_state.targetWidth,
+                    g_state.targetHeight,
+                    WINDOW_FORMAT_RGBA_8888
+                );
+            }
+            g_state.surfaceDirty = true;
+            return;
+        }
+
         if (g_state.captureWidth != drawWidth || g_state.captureHeight != drawHeight) {
             glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, drawWidth, drawHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -344,6 +397,23 @@ namespace LinkuraLocal::StereoVideo {
             glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
         };
 
+        float texScaleX = 1.0f;
+        float texScaleY = 1.0f;
+        float texOffsetX = 0.0f;
+        float texOffsetY = 0.0f;
+        if (prevViewport[2] > 0 && prevViewport[3] > 0 && drawWidth > 0 && drawHeight > 0) {
+            texScaleX = std::clamp(static_cast<float>(prevViewport[2]) / static_cast<float>(drawWidth), 0.0f, 1.0f);
+            texScaleY = std::clamp(static_cast<float>(prevViewport[3]) / static_cast<float>(drawHeight), 0.0f, 1.0f);
+            texOffsetX = std::clamp(static_cast<float>(prevViewport[0]) / static_cast<float>(drawWidth), 0.0f, 1.0f);
+            texOffsetY = std::clamp(static_cast<float>(prevViewport[1]) / static_cast<float>(drawHeight), 0.0f, 1.0f);
+            if (texOffsetX + texScaleX > 1.0f) {
+                texScaleX = std::max(0.0f, 1.0f - texOffsetX);
+            }
+            if (texOffsetY + texScaleY > 1.0f) {
+                texScaleY = std::max(0.0f, 1.0f - texOffsetY);
+            }
+        }
+
         glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, drawWidth, drawHeight);
 
@@ -360,7 +430,11 @@ namespace LinkuraLocal::StereoVideo {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, g_state.captureTexture);
         const GLint texLoc = glGetUniformLocation(g_state.program, "uTex");
+        const GLint texScaleLoc = glGetUniformLocation(g_state.program, "uTexScale");
+        const GLint texOffsetLoc = glGetUniformLocation(g_state.program, "uTexOffset");
         glUniform1i(texLoc, 0);
+        glUniform2f(texScaleLoc, texScaleX, texScaleY);
+        glUniform2f(texOffsetLoc, texOffsetX, texOffsetY);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         if (g_state.presentationTimeProc != nullptr) {

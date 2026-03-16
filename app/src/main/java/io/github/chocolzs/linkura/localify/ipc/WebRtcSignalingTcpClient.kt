@@ -114,6 +114,10 @@ class WebRtcSignalingTcpClient {
         }
     }
 
+    fun isConnected(): Boolean {
+        return writer != null
+    }
+
     private suspend fun runConnectionLoop() {
         val currentPort = port
         try {

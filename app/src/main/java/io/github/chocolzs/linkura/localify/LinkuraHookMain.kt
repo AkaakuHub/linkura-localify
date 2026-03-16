@@ -51,11 +51,20 @@ import kotlinx.serialization.json.Json
 
 import io.github.chocolzs.linkura.localify.ipc.LinkuraAidlClient
 import io.github.chocolzs.linkura.localify.ipc.MessageRouter
+import io.github.chocolzs.linkura.localify.ipc.WebRtcStreamingConfig
 import io.github.chocolzs.linkura.localify.ipc.WebRtcSessionManager
 import io.github.chocolzs.linkura.localify.ipc.LinkuraMessages.*
 
 val TAG = "LinkuraLocalify"
 private const val DEFAULT_SIGNALING_TCP_PORT = 39200
+private const val DEFAULT_STREAMING_CAPTURE_WIDTH = 1920
+private const val DEFAULT_STREAMING_CAPTURE_HEIGHT = 1080
+private const val DEFAULT_STREAMING_CAPTURE_FPS = 60
+private const val DEFAULT_STREAMING_MIN_BITRATE_KBPS = 6000
+private const val DEFAULT_STREAMING_START_BITRATE_KBPS = 14000
+private const val DEFAULT_STREAMING_MAX_BITRATE_KBPS = 28000
+private const val DEFAULT_STREAMING_DEGRADATION_PREFERENCE = 0
+private const val DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY = 1.0
 
 class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
     private lateinit var modulePath: String
@@ -157,6 +166,18 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                     val signalingPort = sanitizeSignalingTcpPort(configUpdate.signalingTcpPort)
                     webRtcSessionManager.setSignalingPort(signalingPort)
                     linkuraConfig?.signalingTcpPort = signalingPort
+                }
+                val currentConfig = linkuraConfig
+                if (currentConfig != null) {
+                    if (configUpdate.hasStreamingCaptureWidth()) currentConfig.streamingCaptureWidth = configUpdate.streamingCaptureWidth
+                    if (configUpdate.hasStreamingCaptureHeight()) currentConfig.streamingCaptureHeight = configUpdate.streamingCaptureHeight
+                    if (configUpdate.hasStreamingCaptureFps()) currentConfig.streamingCaptureFps = configUpdate.streamingCaptureFps
+                    if (configUpdate.hasStreamingMinBitrateKbps()) currentConfig.streamingMinBitrateKbps = configUpdate.streamingMinBitrateKbps
+                    if (configUpdate.hasStreamingStartBitrateKbps()) currentConfig.streamingStartBitrateKbps = configUpdate.streamingStartBitrateKbps
+                    if (configUpdate.hasStreamingMaxBitrateKbps()) currentConfig.streamingMaxBitrateKbps = configUpdate.streamingMaxBitrateKbps
+                    if (configUpdate.hasStreamingDegradationPreference()) currentConfig.streamingDegradationPreference = configUpdate.streamingDegradationPreference
+                    if (configUpdate.hasStreamingScaleResolutionDownBy()) currentConfig.streamingScaleResolutionDownBy = configUpdate.streamingScaleResolutionDownBy
+                    webRtcSessionManager.setStreamingConfig(buildStreamingConfig(currentConfig))
                 }
                 updateConfig(payload)
                 Log.i(TAG, "Config update sent to native layer")
@@ -934,6 +955,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             webRtcSessionManager.setSignalingPort(
                 sanitizeSignalingTcpPort(initConfig?.signalingTcpPort ?: DEFAULT_SIGNALING_TCP_PORT)
             )
+            webRtcSessionManager.setStreamingConfig(buildStreamingConfig(initConfig))
             val programConfig = try {
                 if (programData == null) {
                     ProgramConfig()
@@ -1005,6 +1027,41 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         } else {
             DEFAULT_SIGNALING_TCP_PORT
         }
+    }
+
+    private fun buildStreamingConfig(config: LinkuraConfig?): WebRtcStreamingConfig {
+        return WebRtcStreamingConfig(
+            captureWidth = sanitizeStreamingCaptureDimension(config?.streamingCaptureWidth, DEFAULT_STREAMING_CAPTURE_WIDTH),
+            captureHeight = sanitizeStreamingCaptureDimension(config?.streamingCaptureHeight, DEFAULT_STREAMING_CAPTURE_HEIGHT),
+            captureFps = sanitizeStreamingCaptureFps(config?.streamingCaptureFps),
+            minBitrateKbps = sanitizeStreamingBitrate(config?.streamingMinBitrateKbps, DEFAULT_STREAMING_MIN_BITRATE_KBPS),
+            startBitrateKbps = sanitizeStreamingBitrate(config?.streamingStartBitrateKbps, DEFAULT_STREAMING_START_BITRATE_KBPS),
+            maxBitrateKbps = sanitizeStreamingBitrate(config?.streamingMaxBitrateKbps, DEFAULT_STREAMING_MAX_BITRATE_KBPS),
+            degradationPreference = sanitizeStreamingDegradationPreference(config?.streamingDegradationPreference),
+            scaleResolutionDownBy = sanitizeStreamingScaleResolutionDownBy(config?.streamingScaleResolutionDownBy)
+        )
+    }
+
+    private fun sanitizeStreamingCaptureDimension(value: Int?, defaultValue: Int): Int {
+        val sanitized = if (value != null && value in 256..7680) value else defaultValue
+        return if (sanitized % 2 == 0) sanitized else sanitized - 1
+    }
+
+    private fun sanitizeStreamingCaptureFps(value: Int?): Int {
+        return if (value != null && value in 1..120) value else DEFAULT_STREAMING_CAPTURE_FPS
+    }
+
+    private fun sanitizeStreamingBitrate(value: Int?, defaultValue: Int): Int {
+        return if (value != null && value in 100..200000) value else defaultValue
+    }
+
+    private fun sanitizeStreamingDegradationPreference(value: Int?): Int {
+        return if (value != null && value in 0..3) value else DEFAULT_STREAMING_DEGRADATION_PREFERENCE
+    }
+
+    private fun sanitizeStreamingScaleResolutionDownBy(value: Float?): Double {
+        val normalized = value?.toDouble() ?: DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY
+        return if (normalized in 1.0..4.0) normalized else DEFAULT_STREAMING_SCALE_RESOLUTION_DOWN_BY
     }
 
     private fun processClientResourceData(clientResData: String, currentVersionName: String) {
