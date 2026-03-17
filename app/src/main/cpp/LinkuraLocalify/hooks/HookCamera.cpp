@@ -58,7 +58,7 @@ namespace LinkuraLocal::HookCamera {
     Il2cppUtils::Il2CppObject* fesLiveCameraSwitcherCache = nullptr;
     Il2cppUtils::Il2CppObject* idolTargetingCameraCache = nullptr;
     std::atomic<int32_t> pendingLiveCameraTypeRequest(-1);
-    std::atomic<bool> pendingSchoolIdleTargetSwitchRequest(false);
+    std::atomic<int32_t> pendingSchoolIdleTargetSwitchDirection(0);
     std::atomic<bool> pendingStandViewFreeCameraReset(false);
 
     bool isStereoRequested() {
@@ -148,6 +148,30 @@ namespace LinkuraLocal::HookCamera {
         stereoSourceTransformCache = stereoSourceCameraCache ? stereoSourceCameraCache->GetTransform() : nullptr;
         ensureStereoRig();
         applyStereoProjectionMatrices();
+    }
+
+    std::vector<int32_t> collectSchoolIdleTargetCharacterIds() {
+        static auto cameraClass = UnityResolve::Get("UnityEngine.CoreModule.dll")->Get("Camera");
+        std::vector<int32_t> candidateTargetCharacterIds;
+        if (cameraClass) {
+            for (auto* foundCamera : cameraClass->FindObjectsByType<UnityResolve::UnityType::Camera*>()) {
+                if (!Il2cppUtils::IsNativeObjectAlive(foundCamera)) {
+                    continue;
+                }
+                const std::string cameraName = foundCamera->GetName();
+                int32_t characterId = 0;
+                if (!RE2::FullMatch(cameraName, "LookAtCamera([0-9]{4})[0-9]{2}", &characterId)) {
+                    continue;
+                }
+                candidateTargetCharacterIds.push_back(characterId);
+            }
+        }
+        std::sort(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end());
+        candidateTargetCharacterIds.erase(
+            std::unique(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end()),
+            candidateTargetCharacterIds.end()
+        );
+        return candidateTargetCharacterIds;
     }
 
     bool shouldUseFreeCameraForActiveFesLiveView() {
@@ -466,7 +490,7 @@ namespace LinkuraLocal::HookCamera {
         fesLiveCameraSwitcherCache = nullptr;
         idolTargetingCameraCache = nullptr;
         pendingLiveCameraTypeRequest.store(-1);
-        pendingSchoolIdleTargetSwitchRequest.store(false);
+        pendingSchoolIdleTargetSwitchDirection.store(0);
         pendingStandViewFreeCameraReset.store(false);
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
@@ -761,8 +785,7 @@ namespace LinkuraLocal::HookCamera {
             }
         }
         if (
-            pendingSchoolIdleTargetSwitchRequest.exchange(false)
-            && HookShare::Shareable::renderSceneIsFesLive()
+            HookShare::Shareable::renderSceneIsFesLive()
             && activeFesLiveView == ActiveFesLiveView::SchoolIdle
             && idolTargetingCameraCache
         ) {
@@ -783,51 +806,46 @@ namespace LinkuraLocal::HookCamera {
                     idolTargetingCameraCache,
                     targetCharacterIdField
                 );
-
-                static auto cameraClass = UnityResolve::Get("UnityEngine.CoreModule.dll")->Get("Camera");
-                std::vector<int32_t> candidateTargetCharacterIds;
-                if (cameraClass) {
-                    for (auto* foundCamera : cameraClass->FindObjectsByType<UnityResolve::UnityType::Camera*>()) {
-                        if (!Il2cppUtils::IsNativeObjectAlive(foundCamera)) {
-                            continue;
-                        }
-                        const std::string cameraName = foundCamera->GetName();
-                        int32_t characterId = 0;
-                        if (!RE2::FullMatch(cameraName, "LookAtCamera([0-9]{4})[0-9]{2}", &characterId)) {
-                            continue;
-                        }
-                        candidateTargetCharacterIds.push_back(characterId);
+                const int32_t pendingSchoolIdleTargetDirection = pendingSchoolIdleTargetSwitchDirection.exchange(0);
+                if (pendingSchoolIdleTargetDirection != 0) {
+                    const auto candidateTargetCharacterIds = collectSchoolIdleTargetCharacterIds();
+                    if (candidateTargetCharacterIds.empty()) {
+                        EndCameraRendering_Orig(ctx, camera, method);
+                        return;
                     }
-                }
-
-                // Derive valid SchoolIdle target ids from the live LookAtCamera objects instead of hardcoding idol ids.
-                std::sort(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end());
-                candidateTargetCharacterIds.erase(
-                    std::unique(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end()),
-                    candidateTargetCharacterIds.end()
-                );
-
-                if (!candidateTargetCharacterIds.empty()) {
                     auto currentTargetIt = std::lower_bound(
                         candidateTargetCharacterIds.begin(),
                         candidateTargetCharacterIds.end(),
                         currentTargetCharacterId
                     );
                     int32_t nextTargetCharacterId = candidateTargetCharacterIds.front();
-                    if (
-                        currentTargetIt != candidateTargetCharacterIds.end()
-                        && *currentTargetIt == currentTargetCharacterId
-                    ) {
-                        ++currentTargetIt;
-                        if (currentTargetIt != candidateTargetCharacterIds.end()) {
-                            nextTargetCharacterId = *currentTargetIt;
+                    if (pendingSchoolIdleTargetDirection > 0) {
+                        if (
+                            currentTargetIt != candidateTargetCharacterIds.end()
+                            && *currentTargetIt == currentTargetCharacterId
+                        ) {
+                            ++currentTargetIt;
+                            if (currentTargetIt != candidateTargetCharacterIds.end()) {
+                                nextTargetCharacterId = *currentTargetIt;
+                            }
+                        }
+                    } else {
+                        nextTargetCharacterId = candidateTargetCharacterIds.back();
+                        if (
+                            currentTargetIt != candidateTargetCharacterIds.end()
+                            && *currentTargetIt == currentTargetCharacterId
+                            && currentTargetIt != candidateTargetCharacterIds.begin()
+                        ) {
+                            nextTargetCharacterId = *std::prev(currentTargetIt);
                         }
                     }
-                    setTargetIdolMethod->methodPointer
-                        ? reinterpret_cast<void (*)(Il2cppUtils::Il2CppObject*, int32_t)>(
-                            setTargetIdolMethod->methodPointer
-                        )(idolTargetingCameraCache, nextTargetCharacterId)
-                        : static_cast<void>(0);
+                    if (nextTargetCharacterId != currentTargetCharacterId) {
+                        setTargetIdolMethod->methodPointer
+                            ? reinterpret_cast<void (*)(Il2cppUtils::Il2CppObject*, int32_t)>(
+                                setTargetIdolMethod->methodPointer
+                            )(idolTargetingCameraCache, nextTargetCharacterId)
+                            : static_cast<void>(0);
+                    }
                 }
             }
         }
@@ -1134,6 +1152,21 @@ namespace LinkuraLocal::HookCamera {
         return true;
     }
 
+    FesLiveViewType GetActiveFesLiveView() {
+        switch (activeFesLiveView) {
+            case ActiveFesLiveView::DynamicView:
+                return FesLiveViewType::DynamicView;
+            case ActiveFesLiveView::ArenaView:
+                return FesLiveViewType::ArenaView;
+            case ActiveFesLiveView::StandView:
+                return FesLiveViewType::StandView;
+            case ActiveFesLiveView::SchoolIdle:
+                return FesLiveViewType::SchoolIdle;
+            default:
+                return FesLiveViewType::Unknown;
+        }
+    }
+
     bool CanHandleFesLiveViewSwitchInput() {
         return HookShare::Shareable::renderSceneIsFesLive() && fesLiveCameraSwitcherCache;
     }
@@ -1142,15 +1175,34 @@ namespace LinkuraLocal::HookCamera {
         return CanHandleFesLiveViewSwitchInput() && activeFesLiveView == ActiveFesLiveView::SchoolIdle;
     }
 
-    bool RequestNextFesLiveViewSwitch() {
-        return requestFesLiveCameraSwitch(getNextLiveCameraType(getCurrentLiveCameraType()));
+    bool RequestFesLiveViewSwitch(FesLiveViewType viewType) {
+        switch (viewType) {
+            case FesLiveViewType::DynamicView:
+                return requestFesLiveCameraSwitch(LiveCameraTypeDynamicView);
+            case FesLiveViewType::ArenaView:
+                return requestFesLiveCameraSwitch(LiveCameraTypeArenaView);
+            case FesLiveViewType::StandView:
+                return requestFesLiveCameraSwitch(LiveCameraTypeStandView);
+            case FesLiveViewType::SchoolIdle:
+                return requestFesLiveCameraSwitch(LiveCameraTypeSchoolIdle);
+            default:
+                return false;
+        }
+    }
+
+    bool RequestPreviousSchoolIdleTargetSwitch() {
+        if (!CanHandleSchoolIdleTargetSwitchInput()) {
+            return false;
+        }
+        pendingSchoolIdleTargetSwitchDirection.store(-1);
+        return true;
     }
 
     bool RequestNextSchoolIdleTargetSwitch() {
         if (!CanHandleSchoolIdleTargetSwitchInput()) {
             return false;
         }
-        pendingSchoolIdleTargetSwitchRequest.store(true);
+        pendingSchoolIdleTargetSwitchDirection.store(1);
         return true;
     }
 

@@ -39,7 +39,17 @@ namespace L4Camera {
     CharacterMeshFirstPersonManager<void*> followCharaSet;
     CharacterMeshRenderManager<void*> charaRenderSet;
 
+    struct NetworkControllerNavigationState {
+        bool hasActiveViewState = false;
+        LinkuraLocal::HookCamera::FesLiveViewType currentMajorView =
+            LinkuraLocal::HookCamera::FesLiveViewType::Unknown;
+    };
+
+    NetworkControllerNavigationState networkControllerNavigationState;
+
     void ResetNetworkHeadTrackingState();
+    void OnLeftDown();
+    void OnRightDown();
 
 	// bool rMousePressFlg = false;
 
@@ -235,14 +245,127 @@ namespace L4Camera {
         }
     }
 
+    LinkuraLocal::HookCamera::FesLiveViewType GetNextMajorView(
+        LinkuraLocal::HookCamera::FesLiveViewType currentView
+    ) {
+        using FesLiveViewType = LinkuraLocal::HookCamera::FesLiveViewType;
+        switch (currentView) {
+            case FesLiveViewType::DynamicView:
+                return FesLiveViewType::ArenaView;
+            case FesLiveViewType::ArenaView:
+                return FesLiveViewType::StandView;
+            case FesLiveViewType::StandView:
+                return FesLiveViewType::SchoolIdle;
+            case FesLiveViewType::SchoolIdle:
+                return FesLiveViewType::DynamicView;
+            default:
+                return FesLiveViewType::DynamicView;
+        }
+    }
+
+    void SyncNetworkControllerNavigationStateFromRuntime() {
+        using FesLiveViewType = LinkuraLocal::HookCamera::FesLiveViewType;
+
+        const auto activeView = LinkuraLocal::HookCamera::GetActiveFesLiveView();
+        if (activeView == FesLiveViewType::Unknown) {
+            return;
+        }
+
+        networkControllerNavigationState.hasActiveViewState = true;
+        networkControllerNavigationState.currentMajorView = activeView;
+    }
+
+    void ApplyNetworkControllerNavigationState() {
+        if (!networkControllerNavigationState.hasActiveViewState) {
+            return;
+        }
+
+        const auto activeView = LinkuraLocal::HookCamera::GetActiveFesLiveView();
+        if (activeView != networkControllerNavigationState.currentMajorView) {
+            LinkuraLocal::HookCamera::RequestFesLiveViewSwitch(networkControllerNavigationState.currentMajorView);
+        }
+    }
+
+    void CycleNetworkControllerMajorView() {
+        using FesLiveViewType = LinkuraLocal::HookCamera::FesLiveViewType;
+
+        SyncNetworkControllerNavigationStateFromRuntime();
+        if (!networkControllerNavigationState.hasActiveViewState) {
+            return;
+        }
+
+        const auto activeView = LinkuraLocal::HookCamera::GetActiveFesLiveView();
+        const auto currentView =
+            activeView == FesLiveViewType::Unknown
+                ? networkControllerNavigationState.currentMajorView
+                : activeView;
+
+        if (currentView == FesLiveViewType::Unknown) {
+            networkControllerNavigationState.currentMajorView = FesLiveViewType::DynamicView;
+        } else {
+            networkControllerNavigationState.currentMajorView =
+                GetNextMajorView(currentView);
+        }
+
+    }
+
+    void CycleCurrentCharacterCameraType() {
+        if (LinkuraLocal::HookCamera::GetActiveFesLiveView() != LinkuraLocal::HookCamera::FesLiveViewType::StandView) {
+            return;
+        }
+        SwitchCameraMode();
+    }
+
+    void SelectNextCharacterFromController() {
+        if (LinkuraLocal::HookCamera::GetActiveFesLiveView() == LinkuraLocal::HookCamera::FesLiveViewType::StandView
+            && cameraMode == CameraMode::FREE) {
+            SwitchCameraMode();
+        }
+        OnRightDown();
+    }
+
+    void SelectPreviousCharacterFromController() {
+        if (LinkuraLocal::HookCamera::GetActiveFesLiveView() == LinkuraLocal::HookCamera::FesLiveViewType::StandView
+            && cameraMode == CameraMode::FREE) {
+            SwitchCameraMode();
+        }
+        OnLeftDown();
+    }
+
+    bool SelectPreviousCharacterTarget() {
+        if (cameraMode == CameraMode::FREE) {
+            return false;
+        }
+        if (LinkuraLocal::HookCamera::CanHandleSchoolIdleTargetSwitchInput()) {
+            return LinkuraLocal::HookCamera::RequestPreviousSchoolIdleTargetSwitch();
+        }
+        if (followCharaSet.size() == 0) {
+            return false;
+        }
+        followCharaSet.prev();
+        return true;
+    }
+
+    bool SelectNextCharacterTarget() {
+        if (cameraMode == CameraMode::FREE) {
+            return false;
+        }
+        if (LinkuraLocal::HookCamera::CanHandleSchoolIdleTargetSwitchInput()) {
+            return LinkuraLocal::HookCamera::RequestNextSchoolIdleTargetSwitch();
+        }
+        if (followCharaSet.size() == 0) {
+            return false;
+        }
+        followCharaSet.next();
+        return true;
+    }
+
     void OnLeftDown() {
-        if (cameraMode == CameraMode::FREE) return;
-        L4Camera::followCharaSet.prev();
+        SelectPreviousCharacterTarget();
     }
 
     void OnRightDown() {
-        if (cameraMode == CameraMode::FREE) return;
-        L4Camera::followCharaSet.next();
+        SelectNextCharacterTarget();
     }
 
     void OnUpDown() {
@@ -793,18 +916,14 @@ namespace L4Camera {
 		std::thread([]() {
 			if (cameraMoveState.threadRunning) return;
 			cameraMoveState.threadRunning = true;
-            int moveSensitivityStickLatch = 0;
-            int rotationSensitivityStickLatch = 0;
+            bool rightTriggerCharacterSwitchLatch = false;
+            bool rightGripCharacterSwitchLatch = false;
 			while (true) {
                 NetworkCameraInputState networkInputSnapshot;
                 {
                     std::lock_guard<std::mutex> lock(networkCameraInputMutex);
                     networkInputSnapshot = networkCameraInputState;
                 }
-                constexpr uint32_t buttonB = (1u << 1);
-                constexpr uint32_t buttonY = (1u << 3);
-                const bool isBPressed = (networkInputSnapshot.buttons & buttonB) != 0;
-                const bool isYPressed = (networkInputSnapshot.buttons & buttonY) != 0;
                 if (networkInputSnapshot.hmdVerticalFovDegrees >= 20.0f &&
                     networkInputSnapshot.hmdVerticalFovDegrees <= 170.0f) {
                     baseCamera.fov = networkInputSnapshot.hmdVerticalFovDegrees;
@@ -858,15 +977,23 @@ namespace L4Camera {
                     camera_right(networkInputSnapshot.leftStickX * l_sensitivity *
                                  LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
                 }
-                if (!isBPressed && std::abs(networkInputSnapshot.leftStickY) > 0.01f) {
+                if (std::abs(networkInputSnapshot.leftStickY) > 0.01f) {
                     camera_forward(networkInputSnapshot.leftStickY * l_sensitivity *
                                    LinkuraLocal::Config::cameraMovementSensitivity * baseCamera.fov / 60);
                 }
                 if (std::abs(networkInputSnapshot.rightStickX) > 0.01f) {
                     JRThumbRight(networkInputSnapshot.rightStickX);
                 }
-                if (!isYPressed && std::abs(networkInputSnapshot.rightStickY) > 0.01f) {
+                if (std::abs(networkInputSnapshot.rightStickY) > 0.01f) {
                     JRThumbDown(-networkInputSnapshot.rightStickY);
+                }
+                if (networkInputSnapshot.leftTrigger > 0.01f) {
+                    camera_up(networkInputSnapshot.leftTrigger * l_sensitivity *
+                              LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                }
+                if (networkInputSnapshot.leftGrip > 0.01f) {
+                    camera_down(networkInputSnapshot.leftGrip * l_sensitivity *
+                                LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
                 }
 
                 constexpr float hmdRotationGain = 1.6f;
@@ -967,102 +1094,26 @@ namespace L4Camera {
                     networkCameraInputState.prevButtons = currentButtons;
                 }
 
-                constexpr float sensitivityAdjustScale = 0.5f;
-                constexpr float sensitivityMin = 0.05f;
-                constexpr float sensitivityMax = 10.0f;
-                constexpr float sensitivityStickTriggerThreshold = 0.6f;
-                constexpr float sensitivityStickReleaseThreshold = 0.25f;
                 constexpr uint32_t buttonA = (1u << 0);
+                constexpr uint32_t buttonB = (1u << 1);
                 constexpr uint32_t buttonX = (1u << 2);
-                const bool isAPressed = (currentButtons & buttonA) != 0;
-                const bool isXPressed = (currentButtons & buttonX) != 0;
-                const bool canHandleFesLiveViewSwitch = LinkuraLocal::HookCamera::CanHandleFesLiveViewSwitchInput();
-                const bool canHandleSchoolIdleTargetSwitch = LinkuraLocal::HookCamera::CanHandleSchoolIdleTargetSwitchInput();
+                constexpr uint32_t buttonY = (1u << 3);
 
-                // Trigger FesLive view changes on button press without breaking the existing hold modifiers.
-                if ((risingButtons & buttonY) && canHandleFesLiveViewSwitch) {
-                    LinkuraLocal::HookCamera::RequestNextFesLiveViewSwitch();
-                }
-                if ((risingButtons & buttonB) && canHandleSchoolIdleTargetSwitch) {
-                    LinkuraLocal::HookCamera::RequestNextSchoolIdleTargetSwitch();
-                }
+                SyncNetworkControllerNavigationStateFromRuntime();
 
-                if (!isBPressed) {
-                    moveSensitivityStickLatch = 0;
-                } else {
-                    if (std::abs(networkInputSnapshot.leftStickY) <= sensitivityStickReleaseThreshold) {
-                        moveSensitivityStickLatch = 0;
-                    }
-                    int currentStickDirection = 0;
-                    if (networkInputSnapshot.leftStickY >= sensitivityStickTriggerThreshold) {
-                        currentStickDirection = 1;
-                    } else if (networkInputSnapshot.leftStickY <= -sensitivityStickTriggerThreshold) {
-                        currentStickDirection = -1;
-                    }
-                    if (currentStickDirection != 0 && moveSensitivityStickLatch != currentStickDirection) {
-                        LinkuraLocal::Config::cameraMovementSensitivity = std::clamp(
-                            LinkuraLocal::Config::cameraMovementSensitivity + (currentStickDirection * sensitivityAdjustScale),
-                            sensitivityMin,
-                            sensitivityMax
-                        );
-                        moveSensitivityStickLatch = currentStickDirection;
-                        if (showToast) {
-                            LinkuraLocal::Log::ShowToastFmt("Movement Sensitivity: %.2f", LinkuraLocal::Config::cameraMovementSensitivity);
-                        }
-                    }
+                if (risingButtons & buttonA) {
+                    CycleNetworkControllerMajorView();
                 }
-
-                if (!isYPressed) {
-                    rotationSensitivityStickLatch = 0;
-                } else {
-                    if (std::abs(networkInputSnapshot.rightStickY) <= sensitivityStickReleaseThreshold) {
-                        rotationSensitivityStickLatch = 0;
-                    }
-                    int currentStickDirection = 0;
-                    if (networkInputSnapshot.rightStickY >= sensitivityStickTriggerThreshold) {
-                        currentStickDirection = 1;
-                    } else if (networkInputSnapshot.rightStickY <= -sensitivityStickTriggerThreshold) {
-                        currentStickDirection = -1;
-                    }
-                    if (currentStickDirection != 0 && rotationSensitivityStickLatch != currentStickDirection) {
-                        LinkuraLocal::Config::cameraRotationSensitivity = std::clamp(
-                            LinkuraLocal::Config::cameraRotationSensitivity + (currentStickDirection * sensitivityAdjustScale),
-                            sensitivityMin,
-                            sensitivityMax
-                        );
-                        rotationSensitivityStickLatch = currentStickDirection;
-                        if (showToast) {
-                            LinkuraLocal::Log::ShowToastFmt("Rotation Sensitivity: %.2f", LinkuraLocal::Config::cameraRotationSensitivity);
-                        }
-                    }
+                if (risingButtons & buttonB) {
+                    CycleCurrentCharacterCameraType();
                 }
-
-                if (isYPressed && (risingButtons & buttonA)) {
-                    LinkuraLocal::Config::cameraVerticalSensitivity = std::clamp(
-                        LinkuraLocal::Config::cameraVerticalSensitivity + sensitivityAdjustScale,
-                        sensitivityMin,
-                        sensitivityMax
-                    );
-                    if (showToast) {
-                        LinkuraLocal::Log::ShowToastFmt("Vertical Sensitivity: %.2f", LinkuraLocal::Config::cameraVerticalSensitivity);
-                    }
+                if (risingButtons & buttonX) {
+                    // Reserved for future "ActionA" toggle.
+                    // ToggleActionA();
                 }
-                if (isBPressed && (risingButtons & buttonX)) {
-                    LinkuraLocal::Config::cameraVerticalSensitivity = std::clamp(
-                        LinkuraLocal::Config::cameraVerticalSensitivity - sensitivityAdjustScale,
-                        sensitivityMin,
-                        sensitivityMax
-                    );
-                    if (showToast) {
-                        LinkuraLocal::Log::ShowToastFmt("Vertical Sensitivity: %.2f", LinkuraLocal::Config::cameraVerticalSensitivity);
-                    }
-                }
-
-                if (isAPressed && !isYPressed) {
-                    camera_up(l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
-                }
-                if (isXPressed && !isBPressed) {
-                    camera_down(l_sensitivity * LinkuraLocal::Config::cameraVerticalSensitivity * baseCamera.fov / 60);
+                if (risingButtons & buttonY) {
+                    // Reserved for future "ActionB" toggle.
+                    // ToggleActionB();
                 }
 
                 if (risingButtons & (1u << 4)) {
@@ -1073,6 +1124,19 @@ namespace L4Camera {
                 if (risingButtons & (1u << 5)) {
                     reset_camera();
                 }
+
+                const bool isRightTriggerPressed = networkInputSnapshot.rightTrigger >= 0.6f;
+                const bool isRightGripPressed = networkInputSnapshot.rightGrip >= 0.6f;
+                if (isRightTriggerPressed && !rightTriggerCharacterSwitchLatch) {
+                    SelectNextCharacterFromController();
+                }
+                if (isRightGripPressed && !rightGripCharacterSwitchLatch) {
+                    SelectPreviousCharacterFromController();
+                }
+                rightTriggerCharacterSwitchLatch = isRightTriggerPressed;
+                rightGripCharacterSwitchLatch = isRightGripPressed;
+
+                ApplyNetworkControllerNavigationState();
 
                 constexpr float hmdPosGain = 24.0f;
                 constexpr float hmdPosDeadzone = 0.00005f;

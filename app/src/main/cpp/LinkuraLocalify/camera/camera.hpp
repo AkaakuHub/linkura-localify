@@ -347,9 +347,18 @@ namespace L4Camera {
 }
 
 namespace LinkuraLocal::HookCamera {
-    // These helpers expose the Unity-thread camera switching path to the input thread.
+    enum class FesLiveViewType {
+        Unknown,
+        DynamicView,
+        ArenaView,
+        StandView,
+        SchoolIdle
+    };
+
+    FesLiveViewType GetActiveFesLiveView();
     bool CanHandleFesLiveViewSwitchInput();
     bool CanHandleSchoolIdleTargetSwitchInput();
-    bool RequestNextFesLiveViewSwitch();
+    bool RequestFesLiveViewSwitch(FesLiveViewType viewType);
+    bool RequestPreviousSchoolIdleTargetSwitch();
     bool RequestNextSchoolIdleTargetSwitch();
 }
