@@ -73,6 +73,8 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         LinkuraLocalify/MasterLocal.cpp
         LinkuraLocalify/camera/baseCamera.cpp
         LinkuraLocalify/camera/camera.cpp
+        LinkuraLocalify/camera/camera_controller_bindings.cpp
+        LinkuraLocalify/camera/camera_network_input.cpp
         LinkuraLocalify/config/Config.cpp
         LinkuraLocalify/config/version_compatibility.cpp
         LinkuraLocalify/string_parser/StringParser.cpp
