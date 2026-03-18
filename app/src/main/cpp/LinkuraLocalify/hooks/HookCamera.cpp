@@ -635,7 +635,20 @@ namespace LinkuraLocal::HookCamera {
                             // maybe not working
                             Unity_set_rotation_Injected_Orig(freeCameraTransformCache, &cacheRotation);
                             return;
-                        } else {
+                        }
+                        else if (L4Camera::IsCharacterCameraManualLookEnabled()) {
+                            static LinkuraLocal::Misc::FixedSizeQueue<float> recordsY(60);
+                            const auto newY = L4Camera::CheckNewY(cacheLookAt, true, recordsY);
+                            const auto autoLookAt = UnityResolve::UnityType::Vector3{cacheLookAt.x, newY, cacheLookAt.z};
+                            auto centerPos = L4Camera::CalcFirstPersonPosition(
+                                cachePosition,
+                                cacheForward,
+                                L4Camera::firstPersonPosOffset
+                            );
+                            auto manualLookAt = L4Camera::ApplyCharacterCameraManualLookToTarget(centerPos, autoLookAt);
+                            lookat_injected(freeCameraTransformCache, &manualLookAt, &worldUp);
+                        }
+                        else {
 //                            Log::DebugFmt("set rotation, cacheLookAt is at (%f, %f, %f)", cacheLookAt.x, cacheLookAt.y, cacheLookAt.z);
                             static LinkuraLocal::Misc::FixedSizeQueue<float> recordsY(60);
                             const auto newY = L4Camera::CheckNewY(cacheLookAt, true, recordsY);
@@ -647,7 +660,14 @@ namespace LinkuraLocal::HookCamera {
                 else if (cameraMode == L4Camera::CameraMode::FOLLOW) {
                     auto newLookAtPos = L4Camera::CalcFollowModeLookAt(cachePosition,
                                                                        L4Camera::followPosOffset, true);
-                    lookat_injected(freeCameraTransformCache, &newLookAtPos, &worldUp);
+                    if (L4Camera::IsCharacterCameraManualLookEnabled()) {
+                        auto centerPos = L4Camera::CalcPositionFromLookAt(newLookAtPos, L4Camera::followPosOffset);
+                        auto manualLookAt = L4Camera::ApplyCharacterCameraManualLookToTarget(centerPos, newLookAtPos);
+                        lookat_injected(freeCameraTransformCache, &manualLookAt, &worldUp);
+                    }
+                    else {
+                        lookat_injected(freeCameraTransformCache, &newLookAtPos, &worldUp);
+                    }
                 }
                 else {
                     auto& origCameraLookat = L4Camera::baseCamera.lookAt;

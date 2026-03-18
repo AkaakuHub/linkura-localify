@@ -431,8 +431,7 @@ namespace L4Camera {
                         // ToggleActionA();
                     }
                     if (risingButtons & buttonY) {
-                        // Reserved for future "ActionB" toggle.
-                        // ToggleActionB();
+                        ToggleCharacterCameraManualLook();
                     }
 
                     if (risingButtons & (1u << 4)) {

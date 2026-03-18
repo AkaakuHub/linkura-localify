@@ -18,6 +18,39 @@
 
 namespace L4Camera {
     constexpr float kMaxSafePitchDegrees = 85.0f;
+    namespace {
+        bool characterCameraManualLookEnabled = false;
+        float characterCameraManualLookYawOffsetDegrees = 0.0f;
+        float characterCameraManualLookPitchOffsetDegrees = 0.0f;
+
+        bool SupportsCharacterCameraManualLook(const CameraMode mode) {
+            return mode == CameraMode::FIRST_PERSON || mode == CameraMode::FOLLOW;
+        }
+
+        void ResetCharacterCameraManualLookOffsets() {
+            characterCameraManualLookYawOffsetDegrees = 0.0f;
+            characterCameraManualLookPitchOffsetDegrees = 0.0f;
+        }
+
+        void ApplyCharacterCameraManualLookYawDelta(const float deltaDegrees) {
+            characterCameraManualLookYawOffsetDegrees += deltaDegrees;
+            if (characterCameraManualLookYawOffsetDegrees > 360.0f) {
+                characterCameraManualLookYawOffsetDegrees -= 720.0f;
+            }
+            else if (characterCameraManualLookYawOffsetDegrees < -360.0f) {
+                characterCameraManualLookYawOffsetDegrees += 720.0f;
+            }
+        }
+
+        void ApplyCharacterCameraManualLookPitchDelta(const float deltaDegrees) {
+            characterCameraManualLookPitchOffsetDegrees = std::clamp(
+                characterCameraManualLookPitchOffsetDegrees + deltaDegrees,
+                -kMaxSafePitchDegrees,
+                kMaxSafePitchDegrees
+            );
+        }
+    }
+
 	BaseCamera::Camera baseCamera{};
     BaseCamera::Camera originCamera{};
     CameraMode cameraMode = CameraMode::FREE;
@@ -42,6 +75,10 @@ namespace L4Camera {
 	// bool rMousePressFlg = false;
 
     void SetCameraMode(CameraMode mode) {
+        if (!SupportsCharacterCameraManualLook(mode)) {
+            characterCameraManualLookEnabled = false;
+            ResetCharacterCameraManualLookOffsets();
+        }
         cameraMode = mode;
     }
 
@@ -55,6 +92,74 @@ namespace L4Camera {
 
     FirstPersonRoll GetFirstPersonRoll() {
         return firstPersonRoll;
+    }
+
+    bool ToggleCharacterCameraManualLook() {
+        if (!SupportsCharacterCameraManualLook(cameraMode)) {
+            return false;
+        }
+
+        characterCameraManualLookEnabled = !characterCameraManualLookEnabled;
+        if (characterCameraManualLookEnabled) {
+            ResetCharacterCameraManualLookOffsets();
+            SyncBaseCameraFromCurrentMode();
+            ResetNetworkHeadTrackingState();
+        }
+        else {
+            ResetCharacterCameraManualLookOffsets();
+        }
+        ShowToast(characterCameraManualLookEnabled
+            ? "Character Camera Manual Look"
+            : "Character Camera Target Lock");
+        return true;
+    }
+
+    bool IsCharacterCameraManualLookEnabled() {
+        return SupportsCharacterCameraManualLook(cameraMode) && characterCameraManualLookEnabled;
+    }
+
+    UnityResolve::UnityType::Vector3 ApplyCharacterCameraManualLookToTarget(
+        const UnityResolve::UnityType::Vector3& centerPosition,
+        const UnityResolve::UnityType::Vector3& targetLookAt
+    ) {
+        const auto direction = UnityResolve::UnityType::Vector3{
+            targetLookAt.x - centerPosition.x,
+            targetLookAt.y - centerPosition.y,
+            targetLookAt.z - centerPosition.z
+        };
+        const auto horizontalDistance = std::sqrt((direction.x * direction.x) + (direction.z * direction.z));
+        const auto distance = std::sqrt(
+            (direction.x * direction.x) + (direction.y * direction.y) + (direction.z * direction.z)
+        );
+        const auto safeDistance = distance > 0.0001f ? distance : BaseCamera::look_radius;
+
+        auto yawDegrees = std::atan2(direction.x, -direction.z) * 180.0f / static_cast<float>(M_PI);
+        auto pitchDegrees = 0.0f;
+        if (horizontalDistance > 0.0001f) {
+            pitchDegrees = std::atan2(direction.y, horizontalDistance) * 180.0f / static_cast<float>(M_PI);
+        }
+
+        yawDegrees += characterCameraManualLookYawOffsetDegrees;
+        pitchDegrees = std::clamp(
+            pitchDegrees + characterCameraManualLookPitchOffsetDegrees,
+            -kMaxSafePitchDegrees,
+            kMaxSafePitchDegrees
+        );
+
+        const auto yawRadians = yawDegrees * static_cast<float>(M_PI) / 180.0f;
+        const auto pitchRadians = pitchDegrees * static_cast<float>(M_PI) / 180.0f;
+        const auto cosPitch = std::cos(pitchRadians);
+        auto manualLookAt = UnityResolve::UnityType::Vector3{
+            centerPosition.x + std::sin(yawRadians) * safeDistance * cosPitch,
+            centerPosition.y + std::sin(pitchRadians) * safeDistance,
+            centerPosition.z - std::cos(yawRadians) * safeDistance * cosPitch
+        };
+
+        baseCamera.pos = centerPosition;
+        baseCamera.lookAt = manualLookAt;
+        baseCamera.verticalAngle = yawDegrees;
+        baseCamera.horizontalAngle = pitchDegrees;
+        return manualLookAt;
     }
 
     void reset_camera() {
@@ -164,22 +269,42 @@ namespace L4Camera {
         }
 	}
 	void cameraLookat_up(float mAngel, bool mouse) {
-		baseCamera.horizontalAngle += mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        const auto deltaDegrees = mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        if (IsCharacterCameraManualLookEnabled()) {
+            ApplyCharacterCameraManualLookPitchDelta(deltaDegrees);
+            return;
+        }
+		baseCamera.horizontalAngle += deltaDegrees;
 		if (baseCamera.horizontalAngle >= kMaxSafePitchDegrees) baseCamera.horizontalAngle = kMaxSafePitchDegrees;
 		baseCamera.updateVertLook();
 	}
 	void cameraLookat_down(float mAngel, bool mouse) {
-		baseCamera.horizontalAngle -= mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        const auto deltaDegrees = mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        if (IsCharacterCameraManualLookEnabled()) {
+            ApplyCharacterCameraManualLookPitchDelta(-deltaDegrees);
+            return;
+        }
+		baseCamera.horizontalAngle -= deltaDegrees;
 		if (baseCamera.horizontalAngle <= -kMaxSafePitchDegrees) baseCamera.horizontalAngle = -kMaxSafePitchDegrees;
 		baseCamera.updateVertLook();
 	}
 	void cameraLookat_left(float mAngel) {
-		baseCamera.verticalAngle += mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        const auto deltaDegrees = mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        if (IsCharacterCameraManualLookEnabled()) {
+            ApplyCharacterCameraManualLookYawDelta(deltaDegrees);
+            return;
+        }
+		baseCamera.verticalAngle += deltaDegrees;
 		if (baseCamera.verticalAngle >= 360) baseCamera.verticalAngle = -360;
 		baseCamera.setHoriLook(baseCamera.verticalAngle);
 	}
 	void cameraLookat_right(float mAngel) {
-		baseCamera.verticalAngle -= mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        const auto deltaDegrees = mAngel * LinkuraLocal::Config::cameraRotationSensitivity;
+        if (IsCharacterCameraManualLookEnabled()) {
+            ApplyCharacterCameraManualLookYawDelta(-deltaDegrees);
+            return;
+        }
+		baseCamera.verticalAngle -= deltaDegrees;
 		if (baseCamera.verticalAngle <= -360) baseCamera.verticalAngle = 360;
 		baseCamera.setHoriLook(baseCamera.verticalAngle);
 	}
@@ -190,16 +315,16 @@ namespace L4Camera {
     void SwitchCameraMode() {
         switch (cameraMode) {
             case CameraMode::FREE: {
-                cameraMode = CameraMode::FOLLOW;
+                SetCameraMode(CameraMode::FOLLOW);
                 LinkuraLocal::Log::Info("CameraMode: FOLLOW");
             } break;
             case CameraMode::FOLLOW: {
-                cameraMode = CameraMode::FIRST_PERSON;
+                SetCameraMode(CameraMode::FIRST_PERSON);
                 LinkuraLocal::Log::Info("CameraMode: FIRST_PERSON");
             } break;
             case CameraMode::FIRST_PERSON: {
                 SyncBaseCameraFromCurrentMode();
-                cameraMode = CameraMode::FREE;
+                SetCameraMode(CameraMode::FREE);
                 LinkuraLocal::Log::Info("CameraMode: FREE");
             } break;
         }
@@ -312,12 +437,16 @@ namespace L4Camera {
 
     void JRThumbRight(float value) {
         cameraLookat_right(value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
-        ChangeLiveFollowCameraOffsetX(-1 * value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
+        if (!IsCharacterCameraManualLookEnabled()) {
+            ChangeLiveFollowCameraOffsetX(-1 * value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
+        }
     }
 
     void JRThumbDown(float value) {
         cameraLookat_down(value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
-        ChangeLiveFollowCameraOffsetY(-0.1 * value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
+        if (!IsCharacterCameraManualLookEnabled()) {
+            ChangeLiveFollowCameraOffsetY(-0.1 * value * r_sensitivity * LinkuraLocal::Config::cameraRotationSensitivity * baseCamera.fov / 60);
+        }
     }
 
     void JDadUp(){
@@ -383,16 +512,16 @@ namespace L4Camera {
     void JSelectKeyDown() {
         switch (cameraMode) {
             case CameraMode::FREE: {
-                cameraMode = CameraMode::FOLLOW;
+                SetCameraMode(CameraMode::FOLLOW);
                 ShowToast("Follow Mode");
             } break;
             case CameraMode::FOLLOW: {
-                cameraMode = CameraMode::FIRST_PERSON;
+                SetCameraMode(CameraMode::FIRST_PERSON);
                 ShowToast("First-person Mode");
             } break;
             case CameraMode::FIRST_PERSON: {
                 SyncBaseCameraFromCurrentMode();
-                cameraMode = CameraMode::FREE;
+                SetCameraMode(CameraMode::FREE);
                 ShowToast("Free Mode");
             } break;
         }

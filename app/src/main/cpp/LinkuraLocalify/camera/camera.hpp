@@ -27,6 +27,12 @@ namespace L4Camera {
     CameraMode GetCameraMode();
     void SetFirstPersonRoll(FirstPersonRoll mode);
     FirstPersonRoll GetFirstPersonRoll();
+    bool ToggleCharacterCameraManualLook();
+    bool IsCharacterCameraManualLookEnabled();
+    UnityResolve::UnityType::Vector3 ApplyCharacterCameraManualLookToTarget(
+        const UnityResolve::UnityType::Vector3& centerPosition,
+        const UnityResolve::UnityType::Vector3& targetLookAt
+    );
 
 
     template <typename T>
