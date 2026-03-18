@@ -1,4 +1,5 @@
 #include "../HookMain.h"
+#include "HookCameraRequests.hpp"
 #include "../config/Config.hpp"
 #include "../camera/camera.hpp"
 #include "../Misc.hpp"
@@ -60,6 +61,7 @@ namespace LinkuraLocal::HookCamera {
     std::atomic<int32_t> pendingLiveCameraTypeRequest(-1);
     std::atomic<int32_t> pendingSchoolIdleTargetSwitchDirection(0);
     std::atomic<bool> pendingStandViewFreeCameraReset(false);
+    std::atomic<bool> pendingArchivePlayToggle(false);
 
     bool isStereoRequested() {
         return LinkuraLocal::Config::enableVr;
@@ -492,6 +494,7 @@ namespace LinkuraLocal::HookCamera {
         pendingLiveCameraTypeRequest.store(-1);
         pendingSchoolIdleTargetSwitchDirection.store(0);
         pendingStandViewFreeCameraReset.store(false);
+        pendingArchivePlayToggle.store(false);
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
         HookShare::Shareable::currentArchiveDuration = 0;
@@ -787,6 +790,9 @@ namespace LinkuraLocal::HookCamera {
     }
     DEFINE_HOOK(void, EndCameraRendering, (void* ctx, void* camera, void* method)) {
         // Run queued controller requests here so Unity camera state changes happen on the render thread.
+        if (pendingArchivePlayToggle.exchange(false)) {
+            HookLiveRender::toggleArchivePlay(false);
+        }
         const int32_t pendingLiveCameraType = pendingLiveCameraTypeRequest.exchange(-1);
         if (pendingLiveCameraType >= 0 && HookShare::Shareable::renderSceneIsFesLive() && fesLiveCameraSwitcherCache) {
             static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
@@ -1224,6 +1230,10 @@ namespace LinkuraLocal::HookCamera {
         }
         pendingSchoolIdleTargetSwitchDirection.store(1);
         return true;
+    }
+
+    void RequestArchivePlayToggle() {
+        pendingArchivePlayToggle.store(true);
     }
 
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {

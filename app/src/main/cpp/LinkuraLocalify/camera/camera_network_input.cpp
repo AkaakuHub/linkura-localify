@@ -1,5 +1,6 @@
 #include "camera_controller_bindings.hpp"
 #include "camera_internal.hpp"
+#include "../hooks/HookCameraRequests.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -427,8 +428,7 @@ namespace L4Camera {
                         CycleCurrentCharacterCameraType();
                     }
                     if (risingButtons & buttonX) {
-                        // Reserved for future "ActionA" toggle.
-                        // ToggleActionA();
+                        LinkuraLocal::HookCamera::RequestArchivePlayToggle();
                     }
                     if (risingButtons & buttonY) {
                         ToggleCharacterCameraManualLook();
