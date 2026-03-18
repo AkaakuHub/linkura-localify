@@ -61,8 +61,10 @@ namespace L4Camera {
         firstPersonPosOffset = {0, 0.064f, 0.000f};  // f3: 0.008f
         followPosOffset = {0, 0, 1.5};
         followLookAtOffset = {0, 0};
-		baseCamera.reset();
-        originCamera.reset();
+        baseCamera.verticalAngle = 0.0f;
+        baseCamera.horizontalAngle = 0.0f;
+        baseCamera.setHoriLook(baseCamera.verticalAngle);
+        originCamera.setCamera(&baseCamera);
         ResetNetworkHeadTrackingState();
 	}
 
