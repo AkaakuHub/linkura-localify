@@ -64,7 +64,6 @@ namespace L4Camera {
         baseCamera.verticalAngle = 0.0f;
         baseCamera.horizontalAngle = 0.0f;
         baseCamera.setHoriLook(baseCamera.verticalAngle);
-        originCamera.setCamera(&baseCamera);
         ResetNetworkHeadTrackingState();
 	}
 

@@ -436,6 +436,9 @@ namespace L4Camera {
                     }
 
                     if (risingButtons & (1u << 4)) {
+                        if (GetCameraMode() == CameraMode::FREE) {
+                            baseCamera.setCamera(&originCamera);
+                        }
                         firstPersonPosOffset = {0, 0.064f, 0.000f};
                         followPosOffset = {0, 0, 1.5f};
                         followLookAtOffset = {0, 0};
