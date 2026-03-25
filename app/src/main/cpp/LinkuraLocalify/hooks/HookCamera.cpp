@@ -472,7 +472,9 @@ namespace LinkuraLocal::HookCamera {
     std::chrono::steady_clock::time_point namedCameraRegistrationTime;
 
     void registerCurrentCamera(UnityResolve::UnityType::Camera* currentCamera) {
-        Sharable::backgroundColorCameras.insert(currentCamera);
+        if (HookShare::Shareable::renderSceneIsStory()) {
+            Sharable::backgroundColorCameras.insert(currentCamera);
+        }
         currentCameraCache = currentCamera;
         if (currentCameraCache) currentCameraTransformCache = currentCameraCache->GetTransform();
         currentCameraRegistered = true;
@@ -559,6 +561,10 @@ namespace LinkuraLocal::HookCamera {
 
     DEFINE_HOOK(void, Unity_camera_set_backgroundColor_Injected, (UnityResolve::UnityType::Camera* self, UnityResolve::UnityType::Color* value)) {
         Log::DebugFmt("Unity_camera_set_backgroundColor_Injected HOOKED");
+        if (!HookShare::Shareable::renderSceneIsStory()) {
+            Unity_camera_set_backgroundColor_Injected_Orig(self, value);
+            return;
+        }
         Sharable::backgroundColorCameras.insert(self);
         Unity_camera_set_backgroundColor_Injected_Orig(self, &L4Camera::backgroundColor);
     }
@@ -567,7 +573,10 @@ namespace LinkuraLocal::HookCamera {
         UnityResolve::UnityType::Color color{red, green, blue, alpha};
         auto storedColor = &L4Camera::backgroundColor;
         *storedColor = color;
-        if (!Sharable::backgroundColorCameras.empty() && !HookShare::Shareable::renderSceneIsNone()) {
+        if (!HookShare::Shareable::renderSceneIsStory()) {
+            return;
+        }
+        if (!Sharable::backgroundColorCameras.empty()) {
             for (auto& camera : Sharable::backgroundColorCameras) {
                 if (Il2cppUtils::IsNativeObjectAlive(camera)) Unity_camera_set_backgroundColor_Injected_Orig(camera, &color);
             }
@@ -960,7 +969,9 @@ namespace LinkuraLocal::HookCamera {
         static auto BaseCamera_klass = Il2cppUtils::GetClass("Core.dll", "Inspix", "BaseCamera");
         static auto BaseCamera_get_Name = BaseCamera_klass->Get<UnityResolve::Method>("get_Name");
         auto camera = BaseCamera_get_CameraComponent_Orig(self, method);
-        Sharable::backgroundColorCameras.insert(camera);
+        if (HookShare::Shareable::renderSceneIsStory()) {
+            Sharable::backgroundColorCameras.insert(camera);
+        }
         if (Config::isLegacyMrsVersion() && !HookShare::Shareable::renderSceneIsFesLive()) {
             Log::DebugFmt("BaseCamera_get_CameraComponent HOOKED");
             auto name = BaseCamera_get_Name->Invoke<Il2cppUtils::Il2CppString*>(self);
