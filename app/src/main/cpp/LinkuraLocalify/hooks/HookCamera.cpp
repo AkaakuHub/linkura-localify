@@ -378,7 +378,6 @@ namespace LinkuraLocal::HookCamera {
 
         set_projectionMatrix->Invoke<void>(stereoSourceCameraCache, leftProjection);
         set_projectionMatrix->Invoke<void>(stereoRightCameraCache, rightProjection);
-        bool cullingMatrixApplied = false;
         if (get_worldToCameraMatrix && set_cullingMatrix) {
             auto leftWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(stereoSourceCameraCache);
             auto rightWorldToCamera = get_worldToCameraMatrix->Invoke<UnityResolve::UnityType::Matrix4x4>(stereoRightCameraCache);
@@ -386,7 +385,6 @@ namespace LinkuraLocal::HookCamera {
             auto rightCulling = multiplyMatrix4x4(rightProjection, rightWorldToCamera);
             set_cullingMatrix->Invoke<void>(stereoSourceCameraCache, leftCulling);
             set_cullingMatrix->Invoke<void>(stereoRightCameraCache, rightCulling);
-            cullingMatrixApplied = true;
         }
     }
 
@@ -1138,36 +1136,6 @@ namespace LinkuraLocal::HookCamera {
         LiveCameraTypeStandView,
         LiveCameraTypeSchoolIdle
     };
-
-    LiveCameraType getNextLiveCameraType(LiveCameraType currentView) {
-        switch (currentView) {
-            case LiveCameraTypeDynamicView:
-                return LiveCameraTypeArenaView;
-            case LiveCameraTypeArenaView:
-                return LiveCameraTypeStandView;
-            case LiveCameraTypeStandView:
-                return LiveCameraTypeSchoolIdle;
-            case LiveCameraTypeSchoolIdle:
-                return LiveCameraTypeDynamicView;
-            default:
-                return LiveCameraTypeDynamicView;
-        }
-    }
-
-    LiveCameraType getCurrentLiveCameraType() {
-        switch (activeFesLiveView) {
-            case ActiveFesLiveView::DynamicView:
-                return LiveCameraTypeDynamicView;
-            case ActiveFesLiveView::ArenaView:
-                return LiveCameraTypeArenaView;
-            case ActiveFesLiveView::StandView:
-                return LiveCameraTypeStandView;
-            case ActiveFesLiveView::SchoolIdle:
-                return LiveCameraTypeSchoolIdle;
-            default:
-                return LiveCameraTypeUndefined;
-        }
-    }
 
     bool requestFesLiveCameraSwitch(LiveCameraType targetView) {
         if (!HookShare::Shareable::renderSceneIsFesLive() || !fesLiveCameraSwitcherCache) {

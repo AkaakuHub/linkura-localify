@@ -116,7 +116,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             Log.i(TAG, "AIDL client disconnected from service")
             LogExporter.addLogEntry(TAG, "I", "AIDL client disconnected from service")
             isCameraInfoOverlayEnabled = false
-            setWindowsInputEnabledAsync(false, "aidlDisconnected")
+            setWindowsInputEnabledAsync(false)
             
             // Additional disconnection diagnosis
             Log.w(TAG, "=== Disconnection Details ===")
@@ -736,13 +736,13 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
     }
 
-    private fun setWindowsInputEnabledAsync(enabled: Boolean, reason: String) {
+    private fun setWindowsInputEnabledAsync(enabled: Boolean) {
         windowsInputControlHandler.post {
-            setWindowsInputEnabledInternal(enabled, reason)
+            setWindowsInputEnabledInternal(enabled)
         }
     }
 
-    private fun setWindowsInputEnabledInternal(enabled: Boolean, reason: String) {
+    private fun setWindowsInputEnabledInternal(enabled: Boolean) {
         synchronized(windowsInputLock) {
             if (enabled) {
                 if (windowsInputStarted) {
@@ -750,8 +750,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 }
                 windowsInputTcpClient.start()
                 windowsInputStarted = true
-                Log.i(TAG, "Windows input TCP started: reason=$reason")
-                LogExporter.addLogEntry(TAG, "I", "Windows input TCP started: reason=$reason")
+                Log.d(TAG, "Windows input TCP started")
                 return
             }
 
@@ -761,8 +760,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
             windowsInputTcpClient.stop()
             windowsInputStarted = false
-            Log.i(TAG, "Windows input TCP stopped: reason=$reason")
-            LogExporter.addLogEntry(TAG, "I", "Windows input TCP stopped: reason=$reason")
+            Log.d(TAG, "Windows input TCP stopped")
         }
     }
 
@@ -862,7 +860,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             diagnosePotentialConnectionIssues(context)
         }
 
-        setWindowsInputEnabledAsync(false, "init")
+        setWindowsInputEnabledAsync(false)
         
         Log.i(TAG, "=== AIDL Client Setup Diagnosis Complete ===")
     }
@@ -1262,10 +1260,10 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         fun setWindowsInputEnabledFromNative(enabled: Boolean) {
             val instance = activeHookMainInstance
             if (instance == null) {
-                Log.w(TAG, "setWindowsInputEnabledFromNative ignored: no active instance")
+                Log.v(TAG, "setWindowsInputEnabledFromNative ignored: no active instance")
                 return
             }
-            instance.setWindowsInputEnabledAsync(enabled, "nativeStereoRigSync")
+            instance.setWindowsInputEnabledAsync(enabled)
         }
         @JvmStatic
         external fun loadConfig(configJsonStr: String)

@@ -183,7 +183,7 @@ namespace LinkuraLocal::HookLiveRender {
         if (requestedFps <= 0 || requestedFps < kMinStreamingFps) {
             requestedFps = kMinStreamingFps;
         }
-        Log::InfoFmt(
+        Log::DebugFmt(
             "Unity_set_targetFrameRate override: value=%d config=%d applied=%d",
             value,
             configFps,
@@ -193,7 +193,7 @@ namespace LinkuraLocal::HookLiveRender {
     }
 
     DEFINE_HOOK(void, QualitySettings_set_vSyncCount, (int32_t value)) {
-        Log::InfoFmt(
+        Log::DebugFmt(
             "QualitySettings_set_vSyncCount override: value=%d applied=%d",
             value,
             kNoVSync

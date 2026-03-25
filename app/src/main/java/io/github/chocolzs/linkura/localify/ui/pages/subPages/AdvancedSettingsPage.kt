@@ -60,7 +60,6 @@ import io.github.chocolzs.linkura.localify.models.VrCollapsibleBoxViewModel
 import io.github.chocolzs.linkura.localify.models.VrCollapsibleBoxViewModelFactory
 import io.github.chocolzs.linkura.localify.ui.components.base.CollapsibleBox
 import io.github.chocolzs.linkura.localify.ui.components.GakuButton
-import io.github.chocolzs.linkura.localify.ui.components.GakuSelector
 import io.github.chocolzs.linkura.localify.ui.components.GakuSwitch
 import io.github.chocolzs.linkura.localify.ui.components.GakuTextInput
 import io.github.chocolzs.linkura.localify.ui.components.GakuSlider

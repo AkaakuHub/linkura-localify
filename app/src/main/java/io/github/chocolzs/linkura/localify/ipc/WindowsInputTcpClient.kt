@@ -60,10 +60,6 @@ class WindowsInputTcpClient {
         loopThread = null
     }
 
-    fun restart() {
-        closeSocket()
-    }
-
     private fun runConnectionLoop() {
         while (started.get()) {
             try {
@@ -73,7 +69,7 @@ class WindowsInputTcpClient {
                 clientSocket.connect(InetSocketAddress(HOST, currentPort), 2000)
                 clientSocket.soTimeout = 1000
                 socket = clientSocket
-                Log.i(TAG, "Connected to Windows input server: $HOST:$currentPort")
+                Log.d(TAG, "Connected to Windows input server: $HOST:$currentPort")
                 readPayloadLoop(clientSocket)
             } catch (e: Exception) {
                 if (started.get()) {
