@@ -62,6 +62,15 @@ namespace LinkuraLocal::HookCamera {
     std::atomic<int32_t> pendingSchoolIdleTargetSwitchDirection(0);
     std::atomic<bool> pendingStandViewFreeCameraReset(false);
     std::atomic<bool> pendingArchivePlayToggle(false);
+    std::unordered_set<uint32_t> observedLegacyCharacterIds = {};
+
+    enum LiveCameraType {
+        LiveCameraTypeUndefined,
+        LiveCameraTypeDynamicView,
+        LiveCameraTypeArenaView,
+        LiveCameraTypeStandView,
+        LiveCameraTypeSchoolIdle
+    };
 
     bool isStereoRequested() {
         return LinkuraLocal::Config::enableVr;
@@ -155,6 +164,14 @@ namespace LinkuraLocal::HookCamera {
     std::vector<int32_t> collectSchoolIdleTargetCharacterIds() {
         static auto cameraClass = UnityResolve::Get("UnityEngine.CoreModule.dll")->Get("Camera");
         std::vector<int32_t> candidateTargetCharacterIds;
+        if (Config::isLegacyMrsVersion() && !observedLegacyCharacterIds.empty()) {
+            candidateTargetCharacterIds.reserve(observedLegacyCharacterIds.size());
+            for (const auto characterId : observedLegacyCharacterIds) {
+                candidateTargetCharacterIds.push_back(static_cast<int32_t>(characterId));
+            }
+            std::sort(candidateTargetCharacterIds.begin(), candidateTargetCharacterIds.end());
+            return candidateTargetCharacterIds;
+        }
         if (cameraClass) {
             for (auto* foundCamera : cameraClass->FindObjectsByType<UnityResolve::UnityType::Camera*>()) {
                 if (!Il2cppUtils::IsNativeObjectAlive(foundCamera)) {
@@ -174,6 +191,26 @@ namespace LinkuraLocal::HookCamera {
             candidateTargetCharacterIds.end()
         );
         return candidateTargetCharacterIds;
+    }
+
+    Il2cppUtils::Il2CppObject* getLegacyFesLiveCurrentCameraObject(Il2cppUtils::Il2CppObject* switcher) {
+        if (!Config::isLegacyMrsVersion() || !switcher) {
+            return nullptr;
+        }
+
+        static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
+            "Assembly-CSharp.dll",
+            "School.LiveMain",
+            "FesLiveCameraSwitcher"
+        );
+        static auto currentCameraField = fesLiveCameraSwitcherClass
+            ? fesLiveCameraSwitcherClass->Get<UnityResolve::Field>("currentCamera")
+            : nullptr;
+        if (!currentCameraField) {
+            return nullptr;
+        }
+
+        return Il2cppUtils::ClassGetFieldValue<Il2cppUtils::Il2CppObject*>(switcher, currentCameraField);
     }
 
     bool shouldUseFreeCameraForActiveFesLiveView() {
@@ -495,6 +532,7 @@ namespace LinkuraLocal::HookCamera {
         pendingSchoolIdleTargetSwitchDirection.store(0);
         pendingStandViewFreeCameraReset.store(false);
         pendingArchivePlayToggle.store(false);
+        observedLegacyCharacterIds.clear();
         L4Camera::reset_camera();
         HookShare::Shareable::realtimeRenderingArchiveControllerCache = nullptr;
         HookShare::Shareable::currentArchiveDuration = 0;
@@ -800,16 +838,16 @@ namespace LinkuraLocal::HookCamera {
         if (pendingArchivePlayToggle.exchange(false)) {
             HookLiveRender::toggleArchivePlay(false);
         }
+        static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
+            "Assembly-CSharp.dll",
+            "School.LiveMain",
+            "FesLiveCameraSwitcher"
+        );
+        static auto switchCameraMethod = fesLiveCameraSwitcherClass
+            ? fesLiveCameraSwitcherClass->Get<UnityResolve::Method>("SwitchCamera")
+            : nullptr;
         const int32_t pendingLiveCameraType = pendingLiveCameraTypeRequest.exchange(-1);
         if (pendingLiveCameraType >= 0 && HookShare::Shareable::renderSceneIsFesLive() && fesLiveCameraSwitcherCache) {
-            static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
-                "Assembly-CSharp.dll",
-                "School.LiveMain",
-                "FesLiveCameraSwitcher"
-            );
-            static auto switchCameraMethod = fesLiveCameraSwitcherClass
-                ? fesLiveCameraSwitcherClass->Get<UnityResolve::Method>("SwitchCamera")
-                : nullptr;
             if (switchCameraMethod) {
                 switchCameraMethod->Invoke<void>(
                     fesLiveCameraSwitcherCache,
@@ -820,8 +858,10 @@ namespace LinkuraLocal::HookCamera {
         if (
             HookShare::Shareable::renderSceneIsFesLive()
             && activeFesLiveView == ActiveFesLiveView::SchoolIdle
-            && idolTargetingCameraCache
         ) {
+            if (!idolTargetingCameraCache && fesLiveCameraSwitcherCache) {
+                idolTargetingCameraCache = getLegacyFesLiveCurrentCameraObject(fesLiveCameraSwitcherCache);
+            }
             static auto idolTargetingCameraClass = Il2cppUtils::GetClassIl2cpp(
                 "Assembly-CSharp.dll",
                 "School.LiveMain",
@@ -834,7 +874,7 @@ namespace LinkuraLocal::HookCamera {
                 ? Il2cppUtils::GetMethodIl2cpp(idolTargetingCameraClass, "SetTargetIdol", 1)
                 : nullptr;
 
-            if (targetCharacterIdField && setTargetIdolMethod) {
+            if (idolTargetingCameraCache && targetCharacterIdField && setTargetIdolMethod) {
                 const int32_t currentTargetCharacterId = Il2cppUtils::ClassGetFieldValue<int32_t>(
                     idolTargetingCameraCache,
                     targetCharacterIdField
@@ -873,10 +913,19 @@ namespace LinkuraLocal::HookCamera {
                         }
                     }
                     if (nextTargetCharacterId != currentTargetCharacterId) {
+                        if (Config::isLegacyMrsVersion() && fesLiveCameraSwitcherCache && switchCameraMethod) {
+                            switchCameraMethod->Invoke<void>(
+                                fesLiveCameraSwitcherCache,
+                                LiveCameraType::LiveCameraTypeSchoolIdle
+                            );
+                            if (!idolTargetingCameraCache) {
+                                idolTargetingCameraCache = getLegacyFesLiveCurrentCameraObject(fesLiveCameraSwitcherCache);
+                            }
+                        }
                         setTargetIdolMethod->methodPointer
-                            ? reinterpret_cast<void (*)(Il2cppUtils::Il2CppObject*, int32_t)>(
+                            ? reinterpret_cast<void (*)(Il2cppUtils::Il2CppObject*, int32_t, void*)>(
                                 setTargetIdolMethod->methodPointer
-                            )(idolTargetingCameraCache, nextTargetCharacterId)
+                            )(idolTargetingCameraCache, nextTargetCharacterId, nullptr)
                             : static_cast<void>(0);
                     }
                 }
@@ -1140,13 +1189,6 @@ namespace LinkuraLocal::HookCamera {
         registerCurrentCamera(camera);
         return camera;
     }
-    enum LiveCameraType {
-        LiveCameraTypeUndefined,
-        LiveCameraTypeDynamicView,
-        LiveCameraTypeArenaView,
-        LiveCameraTypeStandView,
-        LiveCameraTypeSchoolIdle
-    };
 
     bool requestFesLiveCameraSwitch(LiveCameraType targetView) {
         if (!HookShare::Shareable::renderSceneIsFesLive() || !fesLiveCameraSwitcherCache) {
@@ -1215,6 +1257,269 @@ namespace LinkuraLocal::HookCamera {
         pendingArchivePlayToggle.store(true);
     }
 
+    UnityResolve::UnityType::Camera* tryGetLegacyFesLiveCurrentCamera(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    );
+
+    void RefreshLegacyDynamicStereoSourceOnTargetTexture(void* camera, void* targetTexture) {
+        if (!Config::isLegacyMrsVersion()) {
+            return;
+        }
+        if (!targetTexture) {
+            return;
+        }
+        if (!HookShare::Shareable::renderSceneIsFesLive()) {
+            return;
+        }
+        if (activeFesLiveView != ActiveFesLiveView::DynamicView) {
+            return;
+        }
+        if (!fesLiveCameraSwitcherCache) {
+            return;
+        }
+
+        auto* resolvedCamera = tryGetLegacyFesLiveCurrentCamera(
+            fesLiveCameraSwitcherCache,
+            LiveCameraType::LiveCameraTypeDynamicView
+        );
+        if (!Il2cppUtils::IsNativeObjectAlive(resolvedCamera)) {
+            return;
+        }
+
+        updateStereoSourceCamera(resolvedCamera);
+        registerCurrentCamera(resolvedCamera);
+    }
+
+    UnityResolve::UnityType::Camera* tryInvokeLegacyCameraGetter(void* currentCameraClass, void* currentCamera) {
+        if (!currentCameraClass || !currentCamera) {
+            return nullptr;
+        }
+
+        constexpr const char* candidateMethodNames[] = {
+            "GetCamera",
+            "get_Camera",
+            "get_CameraComponent",
+        };
+
+        for (const auto* methodName : candidateMethodNames) {
+            auto* method = Il2cppUtils::GetMethodIl2cpp(currentCameraClass, methodName, 0);
+            if (!method || !method->methodPointer) {
+                continue;
+            }
+            auto getter = reinterpret_cast<UnityResolve::UnityType::Camera* (*)(void*, void*)>(method->methodPointer);
+            auto* camera = getter(currentCamera, method);
+            if (Il2cppUtils::IsNativeObjectAlive(camera)) {
+                Log::DebugFmt("Legacy FesLive fallback: resolved camera via %s", methodName);
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName
+    );
+
+    void* tryResolveLegacyObjectFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName,
+        const char* fieldName
+    ) {
+        auto* field = Il2cppUtils::il2cpp_class_get_field_from_name(currentCameraClass, fieldName);
+        if (!field) {
+            return nullptr;
+        }
+        auto* value = Il2cppUtils::ClassGetFieldValue<void*>(currentCamera, field);
+        return value;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFromNestedObject(
+        void* ownerClass,
+        void* ownerObject,
+        const char* ownerClassName
+    ) {
+        constexpr const char* candidateNestedFieldNames[] = {
+            "blendCamera",
+            "timelineCamera",
+            "mainCamera",
+            "targetCamera",
+            "cameraManager",
+        };
+
+        for (const auto* nestedFieldName : candidateNestedFieldNames) {
+            auto* nestedObject = tryResolveLegacyObjectFieldValue(ownerClass, ownerObject, ownerClassName, nestedFieldName);
+            if (!nestedObject) {
+                continue;
+            }
+
+            auto* nestedClass = Il2cppUtils::get_class_from_instance(nestedObject);
+            if (!nestedClass) {
+                continue;
+            }
+
+            const char* nestedClassName = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", nestedClass);
+            if (auto* camera = tryResolveLegacyCameraFieldValue(
+                nestedClass,
+                nestedObject,
+                nestedClassName ? nestedClassName : nestedFieldName
+            )) {
+                return camera;
+            }
+            if (auto* camera = tryInvokeLegacyCameraGetter(nestedClass, nestedObject)) {
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName
+    ) {
+        constexpr const char* candidateFieldNames[] = {
+            "camera",
+            "_camera",
+            "mainCamera",
+            "_mainCamera",
+            "cachedCamera",
+            "_cachedCamera",
+            "targetCamera",
+            "_targetCamera",
+        };
+
+        for (const auto* fieldName : candidateFieldNames) {
+            auto* field = Il2cppUtils::il2cpp_class_get_field_from_name(currentCameraClass, fieldName);
+            if (!field) {
+                continue;
+            }
+            auto* camera = Il2cppUtils::ClassGetFieldValue<UnityResolve::UnityType::Camera*>(currentCamera, field);
+            if (Il2cppUtils::IsNativeObjectAlive(camera)) {
+                Log::DebugFmt(
+                    "Legacy FesLive fallback: resolved camera via %s.%s",
+                    fallbackClassName,
+                    fieldName
+                );
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryGetLegacyFesLiveCurrentCamera(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    ) {
+        if (!Config::isLegacyMrsVersion() || !switcher) {
+            return nullptr;
+        }
+
+        static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
+            "Assembly-CSharp.dll",
+            "School.LiveMain",
+            "FesLiveCameraSwitcher"
+        );
+        static auto currentCameraField = fesLiveCameraSwitcherClass
+            ? fesLiveCameraSwitcherClass->Get<UnityResolve::Field>("currentCamera")
+            : nullptr;
+        if (!currentCameraField) {
+            Log::DebugFmt("Legacy FesLive fallback skipped: currentCamera field is unavailable");
+            return nullptr;
+        }
+
+        auto currentCamera = Il2cppUtils::ClassGetFieldValue<void*>(switcher, currentCameraField);
+        if (!currentCamera) {
+            Log::DebugFmt("Legacy FesLive fallback skipped: currentCamera is null");
+            return nullptr;
+        }
+
+        auto resolveCameraFieldValue = [&](const char* className) -> UnityResolve::UnityType::Camera* {
+            auto* classIl2cpp = Il2cppUtils::get_class_from_instance(currentCamera);
+            if (!classIl2cpp) {
+                Log::DebugFmt("Legacy FesLive fallback: runtime class for currentCamera is null");
+                return nullptr;
+            }
+
+            const char* runtimeClassName = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", classIl2cpp);
+            if (runtimeClassName) {
+                Log::DebugFmt(
+                    "Legacy FesLive fallback: requested=%s runtime=%s",
+                    className,
+                    runtimeClassName
+                );
+            }
+
+            if (auto* camera = tryResolveLegacyCameraFieldValue(classIl2cpp, currentCamera, className)) {
+                return camera;
+            }
+            if (auto* camera = tryInvokeLegacyCameraGetter(classIl2cpp, currentCamera)) {
+                return camera;
+            }
+            if (auto* camera = tryResolveLegacyCameraFromNestedObject(classIl2cpp, currentCamera, className)) {
+                return camera;
+            }
+
+            Log::DebugFmt("Legacy FesLive fallback: camera source not found on %s", className);
+            return nullptr;
+        };
+
+        switch (enableCameraType) {
+            case LiveCameraType::LiveCameraTypeDynamicView:
+                return resolveCameraFieldValue("DynamicCamera");
+            case LiveCameraType::LiveCameraTypeArenaView:
+            case LiveCameraType::LiveCameraTypeStandView:
+                return resolveCameraFieldValue("FesLiveFixedCamera");
+            case LiveCameraType::LiveCameraTypeSchoolIdle:
+                return resolveCameraFieldValue("IdolTargetingCamera");
+            default:
+                return nullptr;
+        }
+    }
+
+    void applyLegacyFesLiveCameraFallback(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    ) {
+        auto* camera = tryGetLegacyFesLiveCurrentCamera(switcher, enableCameraType);
+        if (!Il2cppUtils::IsNativeObjectAlive(camera)) {
+            return;
+        }
+
+        Log::DebugFmt(
+            "Legacy FesLive fallback camera applied: view=%d camera=%p",
+            static_cast<int>(enableCameraType),
+            camera
+        );
+
+        switch (enableCameraType) {
+            case LiveCameraType::LiveCameraTypeArenaView:
+            case LiveCameraType::LiveCameraTypeStandView:
+                if (!initialCameraRendered) {
+                    sanitizeFreeCamera(camera);
+                }
+                registerMainFreeCamera(camera);
+                registerCurrentCamera(camera);
+                break;
+            case LiveCameraType::LiveCameraTypeDynamicView:
+            case LiveCameraType::LiveCameraTypeSchoolIdle:
+                if (enableCameraType == LiveCameraType::LiveCameraTypeSchoolIdle) {
+                    idolTargetingCameraCache = getLegacyFesLiveCurrentCameraObject(switcher);
+                }
+                updateStereoSourceCamera(camera);
+                registerCurrentCamera(camera);
+                break;
+            default:
+                break;
+        }
+    }
+
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {
         fesLiveCameraSwitcherCache = self;
         // Update the active view before the original method runs, because GetCamera hooks can fire inside it.
@@ -1251,6 +1556,7 @@ namespace LinkuraLocal::HookCamera {
                 break;
         }
         FesLiveCameraSwitcher_SwitchCamera_Orig(self, enableCameraType, method);
+        applyLegacyFesLiveCameraFallback(self, enableCameraType);
     }
 
 
@@ -1456,8 +1762,11 @@ namespace LinkuraLocal::HookCamera {
 
     //  hooked
     DEFINE_HOOK(void, ItemSyncTransform_SetupSyncTransform, (void* self,uint32_t c_id, UnityResolve::UnityType::Transform* bindBone, void* mtd)) {
-//        Log::DebugFmt("ItemSyncTransform_SetupSyncTransform HOOKED, %p", self);
-        return ItemSyncTransform_SetupSyncTransform_Orig(self, c_id, bindBone, mtd);
+        if (Config::isLegacyMrsVersion() && HookShare::Shareable::renderSceneIsFesLive()) {
+            observedLegacyCharacterIds.emplace(c_id);
+        }
+        ItemSyncTransform_SetupSyncTransform_Orig(self, c_id, bindBone, mtd);
+        return;
     }
 
     DEFINE_HOOK(void*, SubBoneController_GetAllChildren, (Il2cppUtils::Il2CppObject* self,UnityResolve::UnityType::Transform* target,void* candidates , void* method)) {

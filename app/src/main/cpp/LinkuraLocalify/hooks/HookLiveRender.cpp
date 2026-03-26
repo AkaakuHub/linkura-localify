@@ -1,4 +1,5 @@
 #include "../HookMain.h"
+#include "HookCameraRequests.hpp"
 #include "../../deps/nlohmann/json.hpp"
 #include "../../build/linkura_messages.pb.h"
 #include <thread>
@@ -338,6 +339,7 @@ namespace LinkuraLocal::HookLiveRender {
     DEFINE_HOOK(void, Camera_set_targetTexture, (void* camera,void* targetTexture)) {
         Log::DebugFmt("Camera_set_targetTexture HOOKED");
         applyRenderTextureGraphicSettings(targetTexture);
+        HookCamera::RefreshLegacyDynamicStereoSourceOnTargetTexture(camera, targetTexture);
         Camera_set_targetTexture_Orig(camera, targetTexture);
     }
 
