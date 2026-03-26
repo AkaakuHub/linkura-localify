@@ -1215,6 +1215,266 @@ namespace LinkuraLocal::HookCamera {
         pendingArchivePlayToggle.store(true);
     }
 
+    UnityResolve::UnityType::Camera* tryGetLegacyFesLiveCurrentCamera(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    );
+
+    void RefreshLegacyDynamicStereoSourceOnTargetTexture(void* camera, void* targetTexture) {
+        if (!Config::isLegacyMrsVersion()) {
+            return;
+        }
+        if (!targetTexture) {
+            return;
+        }
+        if (!HookShare::Shareable::renderSceneIsFesLive()) {
+            return;
+        }
+        if (activeFesLiveView != ActiveFesLiveView::DynamicView) {
+            return;
+        }
+        if (!fesLiveCameraSwitcherCache) {
+            return;
+        }
+
+        auto* resolvedCamera = tryGetLegacyFesLiveCurrentCamera(
+            fesLiveCameraSwitcherCache,
+            LiveCameraType::LiveCameraTypeDynamicView
+        );
+        if (!Il2cppUtils::IsNativeObjectAlive(resolvedCamera)) {
+            return;
+        }
+
+        updateStereoSourceCamera(resolvedCamera);
+        registerCurrentCamera(resolvedCamera);
+    }
+
+    UnityResolve::UnityType::Camera* tryInvokeLegacyCameraGetter(void* currentCameraClass, void* currentCamera) {
+        if (!currentCameraClass || !currentCamera) {
+            return nullptr;
+        }
+
+        constexpr const char* candidateMethodNames[] = {
+            "GetCamera",
+            "get_Camera",
+            "get_CameraComponent",
+        };
+
+        for (const auto* methodName : candidateMethodNames) {
+            auto* method = Il2cppUtils::GetMethodIl2cpp(currentCameraClass, methodName, 0);
+            if (!method || !method->methodPointer) {
+                continue;
+            }
+            auto getter = reinterpret_cast<UnityResolve::UnityType::Camera* (*)(void*, void*)>(method->methodPointer);
+            auto* camera = getter(currentCamera, method);
+            if (Il2cppUtils::IsNativeObjectAlive(camera)) {
+                Log::DebugFmt("Legacy FesLive fallback: resolved camera via %s", methodName);
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName
+    );
+
+    void* tryResolveLegacyObjectFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName,
+        const char* fieldName
+    ) {
+        auto* field = Il2cppUtils::il2cpp_class_get_field_from_name(currentCameraClass, fieldName);
+        if (!field) {
+            return nullptr;
+        }
+        auto* value = Il2cppUtils::ClassGetFieldValue<void*>(currentCamera, field);
+        return value;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFromNestedObject(
+        void* ownerClass,
+        void* ownerObject,
+        const char* ownerClassName
+    ) {
+        constexpr const char* candidateNestedFieldNames[] = {
+            "blendCamera",
+            "timelineCamera",
+            "mainCamera",
+            "targetCamera",
+            "cameraManager",
+        };
+
+        for (const auto* nestedFieldName : candidateNestedFieldNames) {
+            auto* nestedObject = tryResolveLegacyObjectFieldValue(ownerClass, ownerObject, ownerClassName, nestedFieldName);
+            if (!nestedObject) {
+                continue;
+            }
+
+            auto* nestedClass = Il2cppUtils::get_class_from_instance(nestedObject);
+            if (!nestedClass) {
+                continue;
+            }
+
+            const char* nestedClassName = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", nestedClass);
+            if (auto* camera = tryResolveLegacyCameraFieldValue(
+                nestedClass,
+                nestedObject,
+                nestedClassName ? nestedClassName : nestedFieldName
+            )) {
+                return camera;
+            }
+            if (auto* camera = tryInvokeLegacyCameraGetter(nestedClass, nestedObject)) {
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryResolveLegacyCameraFieldValue(
+        void* currentCameraClass,
+        void* currentCamera,
+        const char* fallbackClassName
+    ) {
+        constexpr const char* candidateFieldNames[] = {
+            "camera",
+            "_camera",
+            "mainCamera",
+            "_mainCamera",
+            "cachedCamera",
+            "_cachedCamera",
+            "targetCamera",
+            "_targetCamera",
+        };
+
+        for (const auto* fieldName : candidateFieldNames) {
+            auto* field = Il2cppUtils::il2cpp_class_get_field_from_name(currentCameraClass, fieldName);
+            if (!field) {
+                continue;
+            }
+            auto* camera = Il2cppUtils::ClassGetFieldValue<UnityResolve::UnityType::Camera*>(currentCamera, field);
+            if (Il2cppUtils::IsNativeObjectAlive(camera)) {
+                Log::DebugFmt(
+                    "Legacy FesLive fallback: resolved camera via %s.%s",
+                    fallbackClassName,
+                    fieldName
+                );
+                return camera;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UnityResolve::UnityType::Camera* tryGetLegacyFesLiveCurrentCamera(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    ) {
+        if (!Config::isLegacyMrsVersion() || !switcher) {
+            return nullptr;
+        }
+
+        static auto fesLiveCameraSwitcherClass = Il2cppUtils::GetClass(
+            "Assembly-CSharp.dll",
+            "School.LiveMain",
+            "FesLiveCameraSwitcher"
+        );
+        static auto currentCameraField = fesLiveCameraSwitcherClass
+            ? fesLiveCameraSwitcherClass->Get<UnityResolve::Field>("currentCamera")
+            : nullptr;
+        if (!currentCameraField) {
+            Log::DebugFmt("Legacy FesLive fallback skipped: currentCamera field is unavailable");
+            return nullptr;
+        }
+
+        auto currentCamera = Il2cppUtils::ClassGetFieldValue<void*>(switcher, currentCameraField);
+        if (!currentCamera) {
+            Log::DebugFmt("Legacy FesLive fallback skipped: currentCamera is null");
+            return nullptr;
+        }
+
+        auto resolveCameraFieldValue = [&](const char* className) -> UnityResolve::UnityType::Camera* {
+            auto* classIl2cpp = Il2cppUtils::get_class_from_instance(currentCamera);
+            if (!classIl2cpp) {
+                Log::DebugFmt("Legacy FesLive fallback: runtime class for currentCamera is null");
+                return nullptr;
+            }
+
+            const char* runtimeClassName = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", classIl2cpp);
+            if (runtimeClassName) {
+                Log::DebugFmt(
+                    "Legacy FesLive fallback: requested=%s runtime=%s",
+                    className,
+                    runtimeClassName
+                );
+            }
+
+            if (auto* camera = tryResolveLegacyCameraFieldValue(classIl2cpp, currentCamera, className)) {
+                return camera;
+            }
+            if (auto* camera = tryInvokeLegacyCameraGetter(classIl2cpp, currentCamera)) {
+                return camera;
+            }
+            if (auto* camera = tryResolveLegacyCameraFromNestedObject(classIl2cpp, currentCamera, className)) {
+                return camera;
+            }
+
+            Log::DebugFmt("Legacy FesLive fallback: camera source not found on %s", className);
+            return nullptr;
+        };
+
+        switch (enableCameraType) {
+            case LiveCameraType::LiveCameraTypeDynamicView:
+                return resolveCameraFieldValue("DynamicCamera");
+            case LiveCameraType::LiveCameraTypeArenaView:
+            case LiveCameraType::LiveCameraTypeStandView:
+                return resolveCameraFieldValue("FesLiveFixedCamera");
+            case LiveCameraType::LiveCameraTypeSchoolIdle:
+                return resolveCameraFieldValue("IdolTargetingCamera");
+            default:
+                return nullptr;
+        }
+    }
+
+    void applyLegacyFesLiveCameraFallback(
+        Il2cppUtils::Il2CppObject* switcher,
+        LiveCameraType enableCameraType
+    ) {
+        auto* camera = tryGetLegacyFesLiveCurrentCamera(switcher, enableCameraType);
+        if (!Il2cppUtils::IsNativeObjectAlive(camera)) {
+            return;
+        }
+
+        Log::DebugFmt(
+            "Legacy FesLive fallback camera applied: view=%d camera=%p",
+            static_cast<int>(enableCameraType),
+            camera
+        );
+
+        switch (enableCameraType) {
+            case LiveCameraType::LiveCameraTypeArenaView:
+            case LiveCameraType::LiveCameraTypeStandView:
+                if (!initialCameraRendered) {
+                    sanitizeFreeCamera(camera);
+                }
+                registerMainFreeCamera(camera);
+                registerCurrentCamera(camera);
+                break;
+            case LiveCameraType::LiveCameraTypeDynamicView:
+            case LiveCameraType::LiveCameraTypeSchoolIdle:
+                updateStereoSourceCamera(camera);
+                registerCurrentCamera(camera);
+                break;
+            default:
+                break;
+        }
+    }
+
     DEFINE_HOOK(void, FesLiveCameraSwitcher_SwitchCamera, (Il2cppUtils::Il2CppObject* self, LiveCameraType enableCameraType, void* method)) {
         fesLiveCameraSwitcherCache = self;
         // Update the active view before the original method runs, because GetCamera hooks can fire inside it.
@@ -1251,6 +1511,7 @@ namespace LinkuraLocal::HookCamera {
                 break;
         }
         FesLiveCameraSwitcher_SwitchCamera_Orig(self, enableCameraType, method);
+        applyLegacyFesLiveCameraFallback(self, enableCameraType);
     }
 
 
