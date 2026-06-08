@@ -177,6 +177,18 @@ namespace LinkuraLocal::HttpMock {
             UpsertHeader(headers, "Transfer-Encoding", "chunked");
         }
 
+        static void ApplyMockItemHeaders(std::vector<std::pair<std::string, std::string>>& headers) {
+            const auto paidSisca = Config::mockItemNumOverrides.find(1001001);
+            if (paidSisca != Config::mockItemNumOverrides.end()) {
+                UpsertHeader(headers, "jewel_paid_google", std::to_string(paidSisca->second));
+            }
+
+            const auto freeSisca = Config::mockItemNumOverrides.find(1002001);
+            if (freeSisca != Config::mockItemNumOverrides.end()) {
+                UpsertHeader(headers, "jewel_free", std::to_string(freeSisca->second));
+            }
+        }
+
         struct Methods {
             void* restResponseKlass = nullptr;
             Il2cppUtils::MethodInfo* restResponseCtor = nullptr;
@@ -735,6 +747,7 @@ namespace LinkuraLocal::HttpMock {
         }
 
         auto headerPairs = ParseHeadersText(headersText);
+        ApplyMockItemHeaders(headerPairs);
         ApplyStandardHeaders(headerPairs);
 
         // // Debug dump resolved header pairs (after placeholder expansion and standard upsert).

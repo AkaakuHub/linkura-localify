@@ -560,4 +560,13 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="rebuild_mock_database">データベースを再構築</string>
     <string name="rebuild_mock_database_confirm_title">データベースを再構築</string>
     <string name="rebuild_mock_database_confirm_content">データベースファイルを削除し、最初から再構築します（schema + seed）。続けますか？</string>
+    <string name="mock_item_num_overrides">アイテム個数の上書き</string>
+    <string name="mock_item_id">アイテムID</string>
+    <string name="mock_item_num">個数</string>
+    <string name="apply_mock_item_num">適用</string>
+    <string name="remove_mock_item_num">削除</string>
+    <string name="mock_item_override_row_item">アイテムID: %1$d</string>
+    <string name="mock_item_search">アイテム名またはIDで検索</string>
+    <string name="mock_item_search_result_detail">ID: %1$d / 初期値: %2$d</string>
+    <string name="select_mock_item">選択</string>
 </resources>

@@ -73,6 +73,7 @@ import io.github.chocolzs.linkura.localify.ui.components.GakuProgressBar
 import io.github.chocolzs.linkura.localify.ui.components.GakuRadio
 import io.github.chocolzs.linkura.localify.ui.components.GakuSwitch
 import io.github.chocolzs.linkura.localify.ui.components.GakuTextInput
+import io.github.chocolzs.linkura.localify.ui.components.MockItemNumEditor
 import io.github.chocolzs.linkura.localify.ui.components.base.AutoSizeText
 import io.github.chocolzs.linkura.localify.LinkuraHookMain
 import java.io.File
@@ -220,6 +221,12 @@ fun HomePage(modifier: Modifier = Modifier,
                                     }
                                 )
                             }
+                            MockItemNumEditor(
+                                overrides = config.value.mockItemNumOverrides,
+                                onOverrideChanged = { itemId, itemNum ->
+                                    context?.onMockItemNumOverrideChanged(itemId, itemNum)
+                                }
+                            )
                         }
                     }
                 }

@@ -5279,6 +5279,54 @@
         }
       ],
       "is_not_displayed_new_part": false
+    },
+    {
+      "adv_series_id": 200002,
+      "monthly_title": "『Be Cera-fish』",
+      "monthly_description": "105期3月。来年度以降のセラスの所属ユニットが\n決まっていないという問題が発覚！　どのユニットも\n歓迎の手を差し伸べる中、セラスは「ソロになる！」と\n逃げ出してしまい……？",
+      "is_monthly_not_watched": true,
+      "is_current_season": false,
+      "monthly_start_date": "2026-05-31T03:00:00Z",
+      "monthly_end_date": "2035-12-31T14:59:59Z",
+      "adv_info_list": [
+        {
+          "adv_data_id": 20000201,
+          "title": "『Be Cera-fish』",
+          "order_id": 388,
+          "subtitle": "1",
+          "description": "PART 1",
+          "watchable_status": 1,
+          "is_not_watched": true,
+          "open_season_fan_level": 1,
+          "watch_reward_list": [],
+          "adv_unlock_item_num": 0
+        },
+        {
+          "adv_data_id": 20000202,
+          "title": "『Be Cera-fish』",
+          "order_id": 389,
+          "subtitle": "2",
+          "description": "PART 2",
+          "watchable_status": 3,
+          "is_not_watched": true,
+          "open_season_fan_level": 1,
+          "watch_reward_list": [],
+          "adv_unlock_item_num": 1
+        },
+        {
+          "adv_data_id": 20000203,
+          "title": "『Be Cera-fish』",
+          "order_id": 390,
+          "subtitle": "3",
+          "description": "PART 3",
+          "watchable_status": 3,
+          "is_not_watched": true,
+          "open_season_fan_level": 1,
+          "watch_reward_list": [],
+          "adv_unlock_item_num": 1
+        }
+      ],
+      "is_not_displayed_new_part": false
     }
   ]
 }

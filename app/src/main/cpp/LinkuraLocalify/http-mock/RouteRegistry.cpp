@@ -400,6 +400,25 @@ namespace LinkuraLocal::HttpMock {
             };
         }
 
+        static std::optional<MockResponse> HandleItemList(const MockRequestContext&,
+                                                          HttpMockBackend& backend) {
+            auto record = backend.GetItemListResponse();
+            if (!record.has_value()) {
+                Log::WarnFmt("[HttpMockRouteRegistry] item get_list failed backend=%s",
+                             backend.GetStatusSummary().c_str());
+                return std::nullopt;
+            }
+
+            if (record->headersText.empty()) {
+                record->headersText = std::string(OfflineApiMockBuiltIn::DefaultHeadersView);
+            }
+
+            return MockResponse{
+                std::move(record->body), std::move(record->headersText),
+                record->statusCode, std::move(record->statusDescription),
+            };
+        }
+
         static std::optional<MockResponse> HandleRhythmGameSetStart(const MockRequestContext& request,
                                                                       HttpMockBackend& backend) {
             auto record = backend.RhythmGameSetStart(request.payloadJson);
@@ -542,7 +561,7 @@ namespace LinkuraLocal::HttpMock {
             RegisterStaticJson(routes, "/v1/user/card/get_list", OfflineApiMockBuiltIn::UserCardGetListJsonView);
             RegisterBackend(routes, "/v1/user/card/get_detail", HandleCardDetail);
             RegisterBackend(routes, "/v1/user/card/check_style_level_up", HandleCheckStyleLevelUp);
-            RegisterStaticJson(routes, "/v1/user/items/get_list", OfflineApiMockBuiltIn::UserItemsGetListJsonView);
+            RegisterBackend(routes, "/v1/user/items/get_list", HandleItemList);
             RegisterBackend(routes, "/v1/user/item/get_detail", HandleItemDetail);
             RegisterBackend(routes, "/v1/collection/get_character_info", HandleCharacterInfo);
             RegisterStaticJson(routes, "/v1/activity_record/get_top", OfflineApiMockBuiltIn::ActivityRecordGetTopJsonView);

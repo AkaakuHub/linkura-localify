@@ -72,6 +72,15 @@
     <string name="rebuild_mock_database">Rebuild Database</string>
     <string name="rebuild_mock_database_confirm_title">Rebuild Database</string>
     <string name="rebuild_mock_database_confirm_content">This will delete the database file and recreate it from scratch (schema + seed data). Continue?</string>
+    <string name="mock_item_num_overrides">Item Quantity Overrides</string>
+    <string name="mock_item_id">Item ID</string>
+    <string name="mock_item_num">Quantity</string>
+    <string name="apply_mock_item_num">Apply</string>
+    <string name="remove_mock_item_num">Remove</string>
+    <string name="mock_item_override_row_item">Item ID: %1$d</string>
+    <string name="mock_item_search">Search by item name or ID</string>
+    <string name="mock_item_search_result_detail">ID: %1$d / Default: %2$d</string>
+    <string name="select_mock_item">Select</string>
     <string name="about_warn_title">WARNING</string>
     <string name="about_warn_p1">This plugin is for learning and communication only.</string>
     <string name="about_warn_p2">Using external plugin against the relevant TOS so proceed at your own risk.</string>

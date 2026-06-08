@@ -33,6 +33,7 @@ namespace LinkuraLocal::HttpMock {
 
         std::optional<MockStoredResponse> GetItemDetailByDItemId(std::string_view dItemDatasId);
         std::optional<MockStoredResponse> LookupItemDetailFromPayload(std::string_view payloadJson);
+        std::optional<MockStoredResponse> GetItemListResponse();
 
         std::optional<MockStoredResponse> GetDeckListResponse();
         std::optional<MockStoredResponse> ModifyDeckList(std::string_view payloadJson);

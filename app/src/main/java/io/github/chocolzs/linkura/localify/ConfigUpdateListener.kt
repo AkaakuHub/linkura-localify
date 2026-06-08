@@ -71,6 +71,7 @@ interface ConfigListener {
     fun onCustomResVersionChanged(value: String)
     fun onEnableOfflineApiMockChanged(value: Boolean)
     fun onDumpHttpMockJsonChanged(value: Boolean)
+    fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?)
 
     fun onPUseRemoteAssetsChanged(value: Boolean)
     fun onPCleanLocalAssetsChanged(value: Boolean)
@@ -466,6 +467,18 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
 
     override fun onDumpHttpMockJsonChanged(value: Boolean) {
         config.dumpHttpMockJson = value
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?) {
+        val overrides = config.mockItemNumOverrides.toMutableMap()
+        if (itemNum == null) {
+            overrides.remove(itemId)
+        } else {
+            overrides[itemId] = itemNum
+        }
+        config.mockItemNumOverrides = overrides.toSortedMap()
         saveConfig()
         sendConfigUpdate(config)
     }
