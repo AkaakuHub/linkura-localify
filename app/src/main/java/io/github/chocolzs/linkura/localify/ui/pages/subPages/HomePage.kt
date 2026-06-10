@@ -103,7 +103,8 @@ fun HomePage(modifier: Modifier = Modifier,
     }
 
     var localModeExpanded by rememberSaveable { mutableStateOf(false) }
-    var selfhostBaseUrl by rememberSaveable { mutableStateOf(config.value.assetsUrlPrefix) }
+    var selfhostApiBaseUrl by rememberSaveable { mutableStateOf(config.value.apiMockBaseUrl) }
+    var selfhostAssetBaseUrl by rememberSaveable { mutableStateOf(config.value.assetsUrlPrefix) }
     var selfhostCheckResult by rememberSaveable { mutableStateOf("") }
     var selfhostCheckOk by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var selfhostChecking by rememberSaveable { mutableStateOf(false) }
@@ -174,12 +175,21 @@ fun HomePage(modifier: Modifier = Modifier,
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             GakuTextInput(
-                                value = selfhostBaseUrl,
+                                value = selfhostApiBaseUrl,
                                 onValueChange = { value ->
-                                    selfhostBaseUrl = value
+                                    selfhostApiBaseUrl = value
                                 },
                                 label = {
-                                    Text(text = stringResource(R.string.selfhost_base_url))
+                                    Text(text = stringResource(R.string.selfhost_api_base_url))
+                                }
+                            )
+                            GakuTextInput(
+                                value = selfhostAssetBaseUrl,
+                                onValueChange = { value ->
+                                    selfhostAssetBaseUrl = value
+                                },
+                                label = {
+                                    Text(text = stringResource(R.string.selfhost_asset_base_url))
                                 }
                             )
                             GakuButton(
@@ -188,7 +198,7 @@ fun HomePage(modifier: Modifier = Modifier,
                                     .height(36.dp),
                                 text = stringResource(R.string.apply_selfhost_local_mode),
                                 onClick = {
-                                    context?.onApplySelfhostLocalMode(selfhostBaseUrl)
+                                    context?.onApplySelfhostLocalMode(selfhostApiBaseUrl, selfhostAssetBaseUrl)
                                 }
                             )
                             GakuButton(
@@ -197,7 +207,7 @@ fun HomePage(modifier: Modifier = Modifier,
                                     .height(36.dp),
                                 text = stringResource(R.string.apply_selfhost_asset_capture_mode),
                                 onClick = {
-                                    context?.onApplySelfhostAssetCaptureMode(selfhostBaseUrl)
+                                    context?.onApplySelfhostAssetCaptureMode(selfhostApiBaseUrl, selfhostAssetBaseUrl)
                                 }
                             )
                             GakuButton(
@@ -215,7 +225,7 @@ fun HomePage(modifier: Modifier = Modifier,
                                     selfhostCheckResult = ""
                                     selfhostCheckOk = null
                                     coroutineScope.launch {
-                                        val result = checkSelfhostConnection(selfhostBaseUrl)
+                                        val result = checkSelfhostConnection(selfhostApiBaseUrl, selfhostAssetBaseUrl)
                                         selfhostCheckOk = result.ok
                                         selfhostCheckResult = result.message
                                         selfhostChecking = false
@@ -698,16 +708,21 @@ private data class SelfhostConnectionCheckResult(
     val message: String
 )
 
-private suspend fun checkSelfhostConnection(baseUrl: String): SelfhostConnectionCheckResult = withContext(Dispatchers.IO) {
-    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
-    if (normalizedBaseUrl.isEmpty()) {
+private suspend fun checkSelfhostConnection(apiBaseUrl: String, assetBaseUrl: String): SelfhostConnectionCheckResult = withContext(Dispatchers.IO) {
+    val normalizedApiBaseUrl = apiBaseUrl.trim().trimEnd('/')
+    val normalizedAssetBaseUrl = assetBaseUrl.trim().trimEnd('/')
+    if (normalizedApiBaseUrl.isEmpty() || normalizedAssetBaseUrl.isEmpty()) {
         return@withContext SelfhostConnectionCheckResult(false, "NG: empty URL")
     }
 
-    val endpoints = listOf("/client-res", "/archive")
+    val endpoints = listOf(
+        normalizedApiBaseUrl to "/health",
+        normalizedAssetBaseUrl to "/client-res",
+        normalizedAssetBaseUrl to "/archive"
+    )
     val responses = mutableListOf<String>()
-    for (endpoint in endpoints) {
-        val url = URL("$normalizedBaseUrl$endpoint")
+    for ((baseUrl, endpoint) in endpoints) {
+        val url = URL("$baseUrl$endpoint")
         if (url.protocol != "http" && url.protocol != "https") {
             return@withContext SelfhostConnectionCheckResult(false, "NG: unsupported scheme ${url.protocol}")
         }

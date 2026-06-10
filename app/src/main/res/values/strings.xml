@@ -62,6 +62,8 @@
     <string name="advanced_settings">Advanced</string>
     <string name="local_mode">Local Mode</string>
     <string name="selfhost_base_url">Selfhost Base URL</string>
+    <string name="selfhost_api_base_url">Selfhost API Base URL</string>
+    <string name="selfhost_asset_base_url">Selfhost Asset Base URL</string>
     <string name="apply_selfhost_local_mode">Apply Selfhost Local Mode</string>
     <string name="apply_selfhost_asset_capture_mode">Apply Selfhost Asset Capture Mode</string>
     <string name="check_selfhost_connection">Check Selfhost Connection</string>
