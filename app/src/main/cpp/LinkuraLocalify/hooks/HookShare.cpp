@@ -14,6 +14,8 @@ namespace LinkuraLocal::HookShare {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
+        std::mutex selfhostApiPayloadMutex;
+        std::unordered_map<std::string, std::string> selfhostApiPayloadByPath;
 
         static void DumpRestResponseHeadersIfPossible(void* response) {
             if (!response) return;
@@ -742,16 +744,30 @@ namespace LinkuraLocal::HookShare {
     uintptr_t ActivityRecordGetTopWithHttpInfoAsync_MoveNext_Addr = 0;
 
     // http request log
-    static bool IsSelfhostDelegatedApiPath(const std::string& apiPath) {
-        return apiPath == "/v1/archive/withlive_info"
-            || apiPath == "/v1/archive/get_fes_timeline_data"
-            || apiPath == "/v1/withstation/withstation_info";
-    }
+        static bool IsSelfhostDelegatedApiPath(const std::string& apiPath) {
+            return apiPath == "/v1/archive/withlive_info"
+                || apiPath == "/v1/archive/get_fes_timeline_data"
+                || apiPath == "/v1/withstation/withstation_info";
+        }
 
-    static std::string GetApiMockBaseUrl() {
-        if (!Config::apiMockBaseUrl.empty()) return Config::apiMockBaseUrl;
-        return Config::assetsUrlPrefix;
-    }
+        static void RememberSelfhostApiPayload(const std::string& apiPath, const std::string& requestBodyJson) {
+            std::lock_guard<std::mutex> lock(selfhostApiPayloadMutex);
+            selfhostApiPayloadByPath[apiPath] = requestBodyJson;
+        }
+
+        static std::string GetSelfhostApiPayload(const std::string& apiPath, const std::string& fallbackBodyJson) {
+            if (fallbackBodyJson != "{}" && !fallbackBodyJson.empty()) {
+                return fallbackBodyJson;
+            }
+            std::lock_guard<std::mutex> lock(selfhostApiPayloadMutex);
+            const auto it = selfhostApiPayloadByPath.find(apiPath);
+            return it == selfhostApiPayloadByPath.end() ? fallbackBodyJson : it->second;
+        }
+
+        static std::string GetApiMockBaseUrl() {
+            if (!Config::apiMockBaseUrl.empty()) return Config::apiMockBaseUrl;
+            return Config::assetsUrlPrefix;
+        }
 
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
             Il2cppUtils::Il2CppString* path, void* method,
@@ -774,12 +790,13 @@ namespace LinkuraLocal::HookShare {
 
         if (Config::enableOfflineApiMock && path) {
             if (IsSelfhostDelegatedApiPath(strPath) && !GetApiMockBaseUrl().empty()) {
-                AppendOfficialRequestAudit("selfhost_api_delegate", strPath, {{"request", strBody}, {"base_url", GetApiMockBaseUrl()}});
+                const auto requestBodyJson = GetSelfhostApiPayload(strPath, strBody);
+                AppendOfficialRequestAudit("selfhost_api_delegate", strPath, {{"request", requestBodyJson}, {"base_url", GetApiMockBaseUrl()}});
                 Log::WarnFmt("[SelfhostAudit] selfhost_api_delegate path=%s base=%s",
                              strPath.c_str(), GetApiMockBaseUrl().c_str());
-                auto task = LinkuraLocal::HttpMock::CreateSelfhostApiTask(GetApiMockBaseUrl(), strPath, strBody);
+                auto task = LinkuraLocal::HttpMock::CreateSelfhostApiTask(GetApiMockBaseUrl(), strPath, requestBodyJson);
                 if (task) return task;
-                AppendOfficialRequestAudit("selfhost_api_delegate_failed", strPath, {{"request", strBody}, {"base_url", GetApiMockBaseUrl()}});
+                AppendOfficialRequestAudit("selfhost_api_delegate_failed", strPath, {{"request", requestBodyJson}, {"base_url", GetApiMockBaseUrl()}});
                 Log::ErrorFmt("[SelfhostAudit] selfhost_api_delegate_failed path=%s", strPath.c_str());
                 return nullptr;
             }
@@ -949,10 +966,10 @@ namespace LinkuraLocal::HookShare {
     DEFINE_HOOK(void* , ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
+            RememberSelfhostApiPayload("/v1/archive/withlive_info", requestJson);
             AppendOfficialRequestAudit("selfhost_api_delegate", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", GetApiMockBaseUrl()}});
             Log::WarnFmt("[SelfhostAudit] selfhost_api_delegate path=/v1/archive/withlive_info request=%s base=%s",
                          requestJson.c_str(), GetApiMockBaseUrl().c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(GetApiMockBaseUrl(), "/v1/archive/withlive_info", requestJson);
         }
         if (!Config::enableOfflineApiMock && (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay))) {
             return nullptr;
@@ -995,20 +1012,22 @@ namespace LinkuraLocal::HookShare {
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
+            RememberSelfhostApiPayload("/v1/archive/withlive_info", requestJson);
             AppendOfficialRequestAudit("selfhost_api_delegate", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", GetApiMockBaseUrl()}});
             Log::WarnFmt("[SelfhostAudit] selfhost_api_delegate path=/v1/archive/withlive_info request=%s base=%s",
                          requestJson.c_str(), GetApiMockBaseUrl().c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(GetApiMockBaseUrl(), "/v1/archive/withlive_info", requestJson);
+            return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
         }
         return nullptr;
     }
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
+            RememberSelfhostApiPayload("/v1/archive/get_fes_timeline_data", requestJson);
             AppendOfficialRequestAudit("selfhost_api_delegate", "/v1/archive/get_fes_timeline_data", {{"request", requestJson}, {"base_url", GetApiMockBaseUrl()}});
             Log::WarnFmt("[SelfhostAudit] selfhost_api_delegate path=/v1/archive/get_fes_timeline_data request=%s base=%s",
                          requestJson.c_str(), GetApiMockBaseUrl().c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(GetApiMockBaseUrl(), "/v1/archive/get_fes_timeline_data", requestJson);
+            return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
         }
         return nullptr;
     }
