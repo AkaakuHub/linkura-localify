@@ -214,10 +214,10 @@ fun HomePage(modifier: Modifier = Modifier,
                                 }
                             )
                             if (selfhostCheckResult.isNotEmpty()) {
-                                val resultColor = when (selfhostCheckOk) {
-                                    true -> MaterialTheme.colorScheme.primary
-                                    false -> MaterialTheme.colorScheme.error
-                                    null -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                val resultColor = if (selfhostCheckOk == false) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                                 }
                                 Text(
                                     text = selfhostCheckResult,
