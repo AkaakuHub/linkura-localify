@@ -551,6 +551,8 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="local_mode">ローカルモード</string>
     <string name="selfhost_base_url">セルフホストベースURL</string>
     <string name="apply_selfhost_local_mode">セルフホストローカルモードを適用</string>
+    <string name="check_selfhost_connection">セルフホスト疎通確認</string>
+    <string name="selfhost_connection_checking">セルフホスト疎通確認中...</string>
     <string name="enable_offline_api_mock">オフライン API Mock を有効化</string>
     <string name="dump_http_mock_json">HTTP Mock JSON をエクスポート</string>
     <string name="offline_api_mock_dir">Mock ディレクトリ名</string>

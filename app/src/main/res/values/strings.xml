@@ -63,6 +63,8 @@
     <string name="local_mode">Local Mode</string>
     <string name="selfhost_base_url">Selfhost Base URL</string>
     <string name="apply_selfhost_local_mode">Apply Selfhost Local Mode</string>
+    <string name="check_selfhost_connection">Check Selfhost Connection</string>
+    <string name="selfhost_connection_checking">Checking Selfhost Connection...</string>
     <string name="enable_offline_api_mock">Enable Offline API Mock</string>
     <string name="dump_http_mock_json">Dump HTTP Mock JSON</string>
     <string name="offline_api_mock_dir">Offline API Mock Dir</string>

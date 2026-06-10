@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.animateFloatAsState
@@ -48,6 +49,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.chocolzs.linkura.localify.models.LocaleItem
 import io.github.chocolzs.linkura.localify.ui.components.GakuSelector
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import io.github.chocolzs.linkura.localify.MainActivity
 import io.github.chocolzs.linkura.localify.R
@@ -98,6 +104,10 @@ fun HomePage(modifier: Modifier = Modifier,
 
     var localModeExpanded by rememberSaveable { mutableStateOf(false) }
     var selfhostBaseUrl by rememberSaveable { mutableStateOf(config.value.assetsUrlPrefix) }
+    var selfhostCheckResult by rememberSaveable { mutableStateOf("") }
+    var selfhostCheckOk by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var selfhostChecking by rememberSaveable { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     val localModeArrowRotation by animateFloatAsState(
         targetValue = if (localModeExpanded) 180f else 0f,
         animationSpec = tween(durationMillis = 250),
@@ -181,6 +191,40 @@ fun HomePage(modifier: Modifier = Modifier,
                                     context?.onApplySelfhostLocalMode(selfhostBaseUrl)
                                 }
                             )
+                            GakuButton(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                text = if (selfhostChecking) {
+                                    stringResource(R.string.selfhost_connection_checking)
+                                } else {
+                                    stringResource(R.string.check_selfhost_connection)
+                                },
+                                enabled = !selfhostChecking,
+                                onClick = {
+                                    selfhostChecking = true
+                                    selfhostCheckResult = ""
+                                    selfhostCheckOk = null
+                                    coroutineScope.launch {
+                                        val result = checkSelfhostConnection(selfhostBaseUrl)
+                                        selfhostCheckOk = result.ok
+                                        selfhostCheckResult = result.message
+                                        selfhostChecking = false
+                                    }
+                                }
+                            )
+                            if (selfhostCheckResult.isNotEmpty()) {
+                                val resultColor = when (selfhostCheckOk) {
+                                    true -> MaterialTheme.colorScheme.primary
+                                    false -> MaterialTheme.colorScheme.error
+                                    null -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                }
+                                Text(
+                                    text = selfhostCheckResult,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = resultColor
+                                )
+                            }
                             GakuSwitch(
                                 modifier,
                                 stringResource(R.string.enable_offline_api_mock),
@@ -638,6 +682,45 @@ fun HomePage(modifier: Modifier = Modifier,
             Spacer(modifier = modifier.height(bottomSpacerHeight))
         }
     }
+}
+
+private data class SelfhostConnectionCheckResult(
+    val ok: Boolean,
+    val message: String
+)
+
+private suspend fun checkSelfhostConnection(baseUrl: String): SelfhostConnectionCheckResult = withContext(Dispatchers.IO) {
+    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+    if (normalizedBaseUrl.isEmpty()) {
+        return@withContext SelfhostConnectionCheckResult(false, "NG: empty URL")
+    }
+
+    val endpoints = listOf("/client-res", "/archive")
+    val responses = mutableListOf<String>()
+    for (endpoint in endpoints) {
+        val url = URL("$normalizedBaseUrl$endpoint")
+        if (url.protocol != "http" && url.protocol != "https") {
+            return@withContext SelfhostConnectionCheckResult(false, "NG: unsupported scheme ${url.protocol}")
+        }
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "HEAD"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.instanceFollowRedirects = false
+            val responseCode = connection.responseCode
+            responses.add("$endpoint $responseCode")
+            if (responseCode !in 200..299) {
+                return@withContext SelfhostConnectionCheckResult(false, "NG: ${responses.joinToString(", ")}")
+            }
+        } catch (e: IOException) {
+            return@withContext SelfhostConnectionCheckResult(false, "NG: $endpoint ${e.message ?: e::class.java.simpleName}")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    SelfhostConnectionCheckResult(true, "OK: ${responses.joinToString(", ")}")
 }
 
 
