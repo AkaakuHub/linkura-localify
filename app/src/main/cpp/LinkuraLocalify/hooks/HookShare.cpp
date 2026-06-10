@@ -742,15 +742,9 @@ namespace LinkuraLocal::HookShare {
     uintptr_t ActivityRecordGetTopWithHttpInfoAsync_MoveNext_Addr = 0;
 
     // http request log
-        static bool IsSelfhostDelegatedApiPath(const std::string& apiPath) {
-            return apiPath == "/v1/archive/withlive_info"
-                || apiPath == "/v1/archive/get_fes_timeline_data"
-                || apiPath == "/v1/withstation/withstation_info";
-        }
-
-        static std::string GetApiMockBaseUrl() {
+        static std::string GetSelfhostApiBaseUrl() {
             if (!Config::apiMockBaseUrl.empty()) return Config::apiMockBaseUrl;
-            return Config::assetsUrlPrefix;
+            return "";
         }
 
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
@@ -773,27 +767,18 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
 
         if (Config::enableOfflineApiMock && path) {
-            if (IsSelfhostDelegatedApiPath(strPath) && !GetApiMockBaseUrl().empty()) {
-                AppendOfficialRequestAudit("selfhost_api_basepath_request", strPath, {{"request", strBody}, {"base_url", GetApiMockBaseUrl()}});
-                Log::WarnFmt("[SelfhostAudit] selfhost_api_basepath_request path=%s base=%s",
-                             strPath.c_str(), GetApiMockBaseUrl().c_str());
+            const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+            if (!selfhostApiBaseUrl.empty()) {
+                AppendOfficialRequestAudit("selfhost_api_request", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
+                Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
+                             strPath.c_str(), selfhostApiBaseUrl.c_str());
                 return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
                                                   headerParams, formParams, fileParams, pathParams,
                                                   contentType, cancellationToken, method_info);
             }
-            AppendOfficialRequestAudit("offline_api_mock_request", strPath, {{"request", strBody}});
-            Log::WarnFmt("[SelfhostAudit] offline_api_mock_request path=%s request=%s",
-                         strPath.c_str(), strBody.c_str());
-            auto task = LinkuraLocal::HttpMock::CreateMockTaskForApiPath(strPath, strBody);
-            if (!task) {
-                AppendOfficialRequestAudit("missing_offline_api_mock", strPath, {{"request", strBody}});
-                Log::ErrorFmt("[SelfhostAudit] missing_offline_api_mock path=%s request=%s",
-                              strPath.c_str(), strBody.c_str());
-                return nullptr;
-            }
-            Log::WarnFmt("[SelfhostAudit] offline_api_mock_response path=%s task=%p",
-                         strPath.c_str(), task);
-            return task;
+            AppendOfficialRequestAudit("selfhost_api_base_url_empty_use_official", strPath, {{"request", strBody}});
+            Log::ErrorFmt("[SelfhostAudit] selfhost_api_base_url_empty_use_official path=%s request=%s",
+                          strPath.c_str(), strBody.c_str());
         }
 
         AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
@@ -945,11 +930,12 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void* , ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
-            AppendOfficialRequestAudit("selfhost_api_skipped_empty_archive_withlive_info", "/v1/archive/withlive_info", {{"base_url", GetApiMockBaseUrl()}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_skipped_empty_archive_withlive_info path=/v1/archive/withlive_info base=%s",
-                         GetApiMockBaseUrl().c_str());
-            return nullptr;
+        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
+            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info base=%s",
+                         selfhostApiBaseUrl.c_str());
+            return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
         }
         if (!Config::enableOfflineApiMock && (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay))) {
             return nullptr;
@@ -990,21 +976,23 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
+        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
-            AppendOfficialRequestAudit("selfhost_api_basepath_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", GetApiMockBaseUrl()}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_basepath_request path=/v1/archive/withlive_info request=%s base=%s",
-                         requestJson.c_str(), GetApiMockBaseUrl().c_str());
+            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
+                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
         }
         return nullptr;
     }
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
+        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
-            AppendOfficialRequestAudit("selfhost_api_basepath_request", "/v1/archive/get_fes_timeline_data", {{"request", requestJson}, {"base_url", GetApiMockBaseUrl()}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_basepath_request path=/v1/archive/get_fes_timeline_data request=%s base=%s",
-                         requestJson.c_str(), GetApiMockBaseUrl().c_str());
+            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/get_fes_timeline_data", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/get_fes_timeline_data request=%s base=%s",
+                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
         }
         return nullptr;
@@ -1073,7 +1061,7 @@ namespace LinkuraLocal::HookShare {
     DEFINE_HOOK(Il2cppUtils::Il2CppString*, Configuration_get_BasePath, (void* self, void* mtd)) {
         auto result = Configuration_get_BasePath_Orig(self, mtd);
         if (Config::enableOfflineApiMock) {
-            const auto baseUrl = GetApiMockBaseUrl();
+            const auto baseUrl = GetSelfhostApiBaseUrl();
             if (!baseUrl.empty()) {
                 Log::WarnFmt("[SelfhostAudit] Configuration_get_BasePath replaced %s -> %s",
                              result ? result->ToString().c_str() : "(null)",

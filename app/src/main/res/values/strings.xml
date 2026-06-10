@@ -64,12 +64,12 @@
     <string name="selfhost_base_url">Selfhost Base URL</string>
     <string name="selfhost_api_base_url">Selfhost API Base URL</string>
     <string name="selfhost_asset_base_url">Selfhost Asset Base URL</string>
-    <string name="apply_selfhost_local_mode">Apply Selfhost Local Mode</string>
-    <string name="apply_selfhost_asset_capture_mode">Apply Selfhost Asset Capture Mode</string>
+    <string name="apply_selfhost_local_mode">Use Selfhost API and Assets</string>
+    <string name="apply_selfhost_asset_capture_mode">Use Official API and Selfhost Assets</string>
     <string name="check_selfhost_connection">Check Selfhost Connection</string>
     <string name="selfhost_connection_checking">Checking Selfhost Connection...</string>
-    <string name="enable_offline_api_mock">Enable Offline API Mock</string>
-    <string name="dump_http_mock_json">Dump HTTP Mock JSON</string>
+    <string name="enable_offline_api_mock">Use Selfhost API Server</string>
+    <string name="dump_http_mock_json">Record API Responses</string>
     <string name="offline_api_mock_dir">Offline API Mock Dir</string>
     <string name="offline_api_mock_dir_hint">Directory name under app files `linkura-local/` (e.g. mock_api).</string>
     <string name="local_mode_hint_collapsed">Tap the header to expand.</string>

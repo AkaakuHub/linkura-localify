@@ -552,11 +552,12 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="selfhost_base_url">セルフホストベースURL</string>
     <string name="selfhost_api_base_url">セルフホストAPIベースURL</string>
     <string name="selfhost_asset_base_url">セルフホストアセットベースURL</string>
-    <string name="apply_selfhost_local_mode">セルフホストローカルモードを適用</string>
+    <string name="apply_selfhost_local_mode">セルフホストAPIとアセットを使う</string>
+    <string name="apply_selfhost_asset_capture_mode">公式APIとセルフホストアセットを使う</string>
     <string name="check_selfhost_connection">セルフホスト疎通確認</string>
     <string name="selfhost_connection_checking">セルフホスト疎通確認中...</string>
-    <string name="enable_offline_api_mock">オフライン API Mock を有効化</string>
-    <string name="dump_http_mock_json">HTTP Mock JSON をエクスポート</string>
+    <string name="enable_offline_api_mock">セルフホストAPIサーバーを使う</string>
+    <string name="dump_http_mock_json">APIレスポンスを記録する</string>
     <string name="offline_api_mock_dir">Mock ディレクトリ名</string>
     <string name="offline_api_mock_dir_hint">アプリのファイル配下 `linkura-local/` からの相対パス（例: mock_api）。</string>
     <string name="local_mode_hint_collapsed">タイトルをタップして展開します。</string>
