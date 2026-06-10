@@ -2,9 +2,12 @@
 
 #include "../HookMain.h"
 #include "../Local.h"
+#include "../Misc.hpp"
 
 #include "RouteRegistry.hpp"
 #include "offline_api_mock_builtin.hpp"
+
+#include <jni.h>
 
 #include <filesystem>
 #include <fstream>
@@ -15,6 +18,8 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+
+extern jclass g_linkuraHookMainClass;
 
 namespace LinkuraLocal::HttpMock {
     namespace {
@@ -655,7 +660,76 @@ namespace LinkuraLocal::HttpMock {
             }
             return task;
         }
+
+        static std::string FetchSelfhostApiJson(const std::string& baseUrl,
+                                                const std::string& apiPath,
+                                                const std::string& requestBodyJson) {
+            auto env = Misc::GetJNIEnv();
+            if (!env) {
+                Log::Error("[HttpMock] failed to get JNIEnv for selfhost API.");
+                return {};
+            }
+
+            auto klass = g_linkuraHookMainClass;
+            if (!klass) {
+                Log::Error("[HttpMock] LinkuraHookMain global class is null for selfhost API.");
+                return {};
+            }
+
+            auto methodId = env->GetStaticMethodID(
+                    klass,
+                    "fetchSelfhostApi",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+            if (!methodId) {
+                env->ExceptionClear();
+                Log::Error("[HttpMock] failed to resolve fetchSelfhostApi.");
+                return {};
+            }
+
+            auto jBaseUrl = env->NewStringUTF(baseUrl.c_str());
+            auto jApiPath = env->NewStringUTF(apiPath.c_str());
+            auto jRequestBodyJson = env->NewStringUTF(requestBodyJson.c_str());
+            auto result = static_cast<jstring>(env->CallStaticObjectMethod(
+                    klass, methodId, jBaseUrl, jApiPath, jRequestBodyJson));
+
+            std::string body;
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                Log::ErrorFmt("[HttpMock] selfhost API call failed path=%s", apiPath.c_str());
+            } else if (result) {
+                const char* chars = env->GetStringUTFChars(result, nullptr);
+                if (chars) {
+                    body = chars;
+                    env->ReleaseStringUTFChars(result, chars);
+                }
+            }
+
+            if (result) env->DeleteLocalRef(result);
+            env->DeleteLocalRef(jRequestBodyJson);
+            env->DeleteLocalRef(jApiPath);
+            env->DeleteLocalRef(jBaseUrl);
+            return body;
+        }
     } // namespace
+
+    void* CreateSelfhostApiTask(const std::string& baseUrl, const std::string& apiPath, const std::string& requestBodyJson) {
+        const auto jsonBody = FetchSelfhostApiJson(baseUrl, apiPath, requestBodyJson);
+        if (jsonBody.empty()) {
+            Log::ErrorFmt("[HttpMock] empty selfhost API response path=%s", apiPath.c_str());
+            return nullptr;
+        }
+
+        std::vector<std::pair<std::string, std::string>> headerPairs;
+        ApplyStandardHeaders(headerPairs);
+        auto resp = CreateRestResponse(jsonBody, 200, "OK (selfhost)", headerPairs);
+        if (!resp) {
+            Log::ErrorFmt("[HttpMock] failed to create selfhost RestResponse path=%s", apiPath.c_str());
+            return nullptr;
+        }
+        Log::WarnFmt("[SelfhostAudit] selfhost_api_response path=%s bytes=%d", apiPath.c_str(), (int)jsonBody.size());
+        return TaskFromResultObject(resp);
+    }
 
     void* CreateMockTaskForApiPath(const std::string& apiPath, const std::string& requestBodyJson) {
         const auto mockFile = GetMockFilePath(apiPath);
