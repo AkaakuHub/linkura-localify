@@ -35,6 +35,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import kotlin.system.measureTimeMillis
 import io.github.chocolzs.linkura.localify.hookUtils.FileHotUpdater
@@ -1192,6 +1195,34 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
             }
             else {
                 Log.e(TAG, "showToast: $message failed: applicationContext is null")
+            }
+        }
+
+        @JvmStatic
+        fun fetchSelfhostApi(baseUrl: String, apiPath: String, requestJson: String): String {
+            val normalizedBase = baseUrl.trim().trimEnd('/')
+            val normalizedPath = if (apiPath.startsWith("/")) apiPath else "/$apiPath"
+            val connection = (URL("$normalizedBase$normalizedPath").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 5000
+                readTimeout = 5000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("Accept", "application/json")
+            }
+            return try {
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(requestJson.ifBlank { "{}" })
+                }
+                val statusCode = connection.responseCode
+                val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (statusCode !in 200..299) {
+                    throw IllegalStateException("selfhost API failed: $statusCode $body")
+                }
+                body
+            } finally {
+                connection.disconnect()
             }
         }
 

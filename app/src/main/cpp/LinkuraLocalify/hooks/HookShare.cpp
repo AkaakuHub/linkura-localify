@@ -768,17 +768,19 @@ namespace LinkuraLocal::HookShare {
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
-            if (!selfhostApiBaseUrl.empty()) {
-                AppendOfficialRequestAudit("selfhost_api_request", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
-                Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
-                             strPath.c_str(), selfhostApiBaseUrl.c_str());
-                return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
-                                                  headerParams, formParams, fileParams, pathParams,
-                                                  contentType, cancellationToken, method_info);
+            if (selfhostApiBaseUrl.empty()) {
+                AppendOfficialRequestAudit("selfhost_api_base_url_empty", strPath, {{"request", strBody}});
+                Log::ErrorFmt("[SelfhostAudit] selfhost_api_base_url_empty path=%s", strPath.c_str());
+                return nullptr;
             }
-            AppendOfficialRequestAudit("selfhost_api_base_url_empty_use_official", strPath, {{"request", strBody}});
-            Log::ErrorFmt("[SelfhostAudit] selfhost_api_base_url_empty_use_official path=%s request=%s",
-                          strPath.c_str(), strBody.c_str());
+            AppendOfficialRequestAudit("selfhost_api_request", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
+                         strPath.c_str(), selfhostApiBaseUrl.c_str());
+            auto task = LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, strPath, strBody);
+            if (task) return task;
+            AppendOfficialRequestAudit("selfhost_api_request_failed", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
+            Log::ErrorFmt("[SelfhostAudit] selfhost_api_request_failed path=%s", strPath.c_str());
+            return nullptr;
         }
 
         AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
@@ -932,10 +934,11 @@ namespace LinkuraLocal::HookShare {
     DEFINE_HOOK(void* , ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
         if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
-            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"base_url", selfhostApiBaseUrl}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info base=%s",
-                         selfhostApiBaseUrl.c_str());
-            return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
+            const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
+            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
+                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
+            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
         }
         if (!Config::enableOfflineApiMock && (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay))) {
             return nullptr;
@@ -982,7 +985,7 @@ namespace LinkuraLocal::HookShare {
             AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
             Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
+            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
         }
         return nullptr;
     }
@@ -993,7 +996,7 @@ namespace LinkuraLocal::HookShare {
             AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/get_fes_timeline_data", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
             Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/get_fes_timeline_data request=%s base=%s",
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
+            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/get_fes_timeline_data", requestJson);
         }
         return nullptr;
     }
@@ -1063,11 +1066,16 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableOfflineApiMock) {
             const auto baseUrl = GetSelfhostApiBaseUrl();
             if (!baseUrl.empty()) {
+                AppendOfficialRequestAudit("api_basepath_rewritten",
+                                           result ? result->ToString() : "(null)",
+                                           {{"rewritten", baseUrl}});
                 Log::WarnFmt("[SelfhostAudit] Configuration_get_BasePath replaced %s -> %s",
                              result ? result->ToString().c_str() : "(null)",
                              baseUrl.c_str());
                 return Il2cppUtils::Il2CppString::New(baseUrl);
             }
+            AppendOfficialRequestAudit("selfhost_api_base_url_empty", result ? result->ToString() : "(null)", {});
+            return Il2cppUtils::Il2CppString::New("http://127.0.0.1:9");
         }
         return result;
     }
