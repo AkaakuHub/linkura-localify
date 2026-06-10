@@ -75,6 +75,23 @@ namespace LinkuraLocal::HttpMock {
             };
         }
 
+        static std::optional<MockResponse> HandleWithStationList(const MockRequestContext&,
+                                                                 HttpMockBackend&) {
+            auto bodyJson = OfflineApiMockBuiltIn::ArchiveGetHomeJsonObj();
+            if (!bodyJson.is_object() || !bodyJson.contains("with_station_list")) {
+                return std::nullopt;
+            }
+
+            nlohmann::json response;
+            response["with_station_list"] = bodyJson["with_station_list"];
+            return MockResponse{
+                response.dump(),
+                std::string(OfflineApiMockBuiltIn::DefaultHeadersView),
+                200,
+                "OK (offline mock)",
+            };
+        }
+
         static std::optional<MockResponse> HandleCharacterInfo(const MockRequestContext& request,
                                                                HttpMockBackend& backend) {
             auto record = backend.LookupCharacterInfoFromPayload(request.payloadJson);
@@ -528,6 +545,7 @@ namespace LinkuraLocal::HttpMock {
             RegisterStaticJson(routes, "/v1/follow/live_chat_group_list", OfflineApiMockBuiltIn::FollowLiveChatGroupListJsonView);
             RegisterStaticJson(routes, "/v1/archive/get_home", OfflineApiMockBuiltIn::ArchiveGetHomeJsonView);
             RegisterStaticJson(routes, "/v1/archive/get_archive_list", OfflineApiMockBuiltIn::ArchiveGetArchiveListJsonView);
+            RegisterBackend(routes, "/v1/archive/get_with_station_list", HandleWithStationList);
             RegisterStaticJson(routes, "/v1/out_quest_live/get_quest_top", OfflineApiMockBuiltIn::OutQuestLiveGetQuestTopJsonView);
             RegisterStaticJson(routes, "/v1/out_quest_live/daily/get_stage_select", OfflineApiMockBuiltIn::OutQuestLiveDailyGetStageSelectJsonView);
             RegisterBackend(routes, "/v1/out_quest_live/daily/get_stage_list", HandleDailyQuestStageList);

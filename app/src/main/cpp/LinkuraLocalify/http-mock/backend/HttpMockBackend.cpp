@@ -483,6 +483,16 @@ namespace LinkuraLocal::HttpMock {
         const auto* responseJson = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         MockStoredResponse response;
         response.body = responseJson ? responseJson : "{}";
+        if (Config::enableOfflineApiMock) {
+            auto bodyJson = nlohmann::json::parse(response.body, nullptr, false);
+            if (bodyJson.is_object()) {
+                bodyJson["has_extra_admission"] = true;
+                if (bodyJson.contains("has_admission")) {
+                    bodyJson["has_admission"] = true;
+                }
+                response.body = bodyJson.dump();
+            }
+        }
         sqlite3_finalize(stmt);
         return response;
     }

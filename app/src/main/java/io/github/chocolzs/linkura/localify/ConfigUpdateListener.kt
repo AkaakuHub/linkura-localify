@@ -494,6 +494,7 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.enableOfflineApiMock = true
         config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true
+        config.unlockAfter = true
         saveConfig()
         sendConfigUpdate(config)
     }
