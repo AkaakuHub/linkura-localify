@@ -569,6 +569,7 @@ namespace LinkuraLocal::HttpMock {
 
             RegisterBackend(routes, "/v1/archive/get_with_archive_data", HandleArchiveDetail);
             RegisterBackend(routes, "/v1/archive/get_fes_archive_data", HandleArchiveDetail);
+            RegisterBackend(routes, "/v1/archive/withlive_info", HandleArchiveDetail);
 
             RegisterStaticJson(routes, "/v1/profile/get_mute_list", OfflineApiMockBuiltIn::ProfileGetMuteListJsonView);
 
