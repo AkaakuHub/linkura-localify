@@ -3,6 +3,8 @@
 #include "../Local.h"
 #include "http-mock/HttpMock.hpp"
 #include <re2/re2.h>
+#include <fstream>
+#include <filesystem>
 #include <mutex>
 #include <string_view>
 #include <unordered_set>
@@ -211,6 +213,61 @@ namespace LinkuraLocal::HookShare {
             Log::VerboseFmt("Path combined with assets_url: %s -> %s", uri.c_str(), result.c_str());
             return result;
         }
+    }
+
+    bool IsOfficialAssetUrl(const std::string& uri) {
+        return uri.starts_with("https://assets.link-like-lovelive.app/");
+    }
+
+    void AppendOfficialRequestAudit(const std::string& kind, const std::string& target, const nlohmann::json& detail) {
+        static std::mutex auditMutex;
+        nlohmann::json event = {
+            {"kind", kind},
+            {"target", target},
+            {"detail", detail},
+            {"current_client_version", Config::currentClientVersion.toString()},
+            {"current_res_version", Config::currentResVersion},
+        };
+
+        Log::WarnFmt("[OfficialRequestAudit] kind=%s target=%s detail=%s",
+                     kind.c_str(), target.c_str(), detail.dump().c_str());
+
+        std::error_code ec;
+        const auto auditPath = Local::GetBasePath().parent_path() / "official_request_audit.jsonl";
+        std::filesystem::create_directories(auditPath.parent_path(), ec);
+        std::lock_guard<std::mutex> lock(auditMutex);
+        std::ofstream ofs(auditPath, std::ios::app);
+        if (ofs.is_open()) {
+            ofs << event.dump() << '\n';
+        }
+    }
+
+    bool RewriteOfficialAssetUrls(nlohmann::json& value) {
+        bool rewritten = false;
+        if (value.is_object()) {
+            for (auto& item : value.items()) {
+                rewritten |= RewriteOfficialAssetUrls(item.value());
+            }
+            return rewritten;
+        }
+        if (value.is_array()) {
+            for (auto& item : value) {
+                rewritten |= RewriteOfficialAssetUrls(item);
+            }
+            return rewritten;
+        }
+        if (!value.is_string() || Config::assetsUrlPrefix.empty()) {
+            return false;
+        }
+
+        const auto uri = value.get<std::string>();
+        if (!IsOfficialAssetUrl(uri)) {
+            return false;
+        }
+        const auto rewrittenUri = replaceUriHost(uri, Config::assetsUrlPrefix);
+        AppendOfficialRequestAudit("asset_url_rewritten", uri, {{"rewritten", rewrittenUri}});
+        value = rewrittenUri;
+        return true;
     }
 
     bool isMotionCaptureCompatible(const std::string & url, const nlohmann::json& archive_config) {
@@ -657,11 +714,14 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableOfflineApiMock && path) {
             auto task = LinkuraLocal::HttpMock::CreateMockTaskForApiPath(strPath, strBody);
             if (!task) {
-                Log::InfoFmt("[HttpMock] noop/unmatched for path=%s, returning nullptr", strPath.c_str());
+                AppendOfficialRequestAudit("missing_offline_api_mock", strPath, {{"request", strBody}});
+                Log::WarnFmt("[HttpMock] unmatched for path=%s, returning nullptr", strPath.c_str());
                 return nullptr;
             }
             return task;
         }
+
+        AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
 
         return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
                                           headerParams, formParams, fileParams, pathParams,
@@ -676,6 +736,9 @@ namespace LinkuraLocal::HookShare {
         }
         auto result = ApiClient_Deserialize_Orig(self, response, type, method_info);
         auto json = nlohmann::json::parse(Il2cppUtils::ToJsonStr(result)->ToString());
+        if (RewriteOfficialAssetUrls(json)) {
+            result = Il2cppUtils::FromJsonStr(json.dump(), type);
+        }
         // Print API response type name and response body for debugging
         {
             auto klass = UnityResolve::Invoke<void*>("il2cpp_class_from_system_type", type);

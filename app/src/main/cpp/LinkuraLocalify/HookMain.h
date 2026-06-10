@@ -59,6 +59,8 @@ namespace LinkuraLocal::HookStory {
 namespace LinkuraLocal::HookShare {
     void Install(HookInstaller* hookInstaller);
     std::string replaceUriHost(const std::string& external_link, const std::string& assets_url);
+    bool IsOfficialAssetUrl(const std::string& uri);
+    void AppendOfficialRequestAudit(const std::string& kind, const std::string& target, const nlohmann::json& detail = nlohmann::json::object());
     namespace Shareable {
         struct ArchiveData {
             std::string id;

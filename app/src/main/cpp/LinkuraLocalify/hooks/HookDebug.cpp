@@ -48,8 +48,11 @@ namespace LinkuraLocal::HookDebug {
 
     DEFINE_HOOK(Il2cppString*, Hailstorm_AssetDownloadJob_get_UrlBase, (Il2cppUtils::Il2CppObject* self, void* method)) {
         auto base = Hailstorm_AssetDownloadJob_get_UrlBase_Orig(self, method);
+        const auto originalBase = base ? base->ToString() : "";
         if (!Config::assetsUrlPrefix.empty()) {
-            base = Il2cppString::New(HookShare::replaceUriHost(base->ToString(), Config::assetsUrlPrefix));
+            base = Il2cppString::New(HookShare::replaceUriHost(originalBase, Config::assetsUrlPrefix));
+        } else if (HookShare::IsOfficialAssetUrl(originalBase)) {
+            HookShare::AppendOfficialRequestAudit("official_asset_base_allowed", originalBase);
         }
         return base;
     }
