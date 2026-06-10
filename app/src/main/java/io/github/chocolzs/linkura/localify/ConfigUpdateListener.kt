@@ -492,6 +492,7 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         }
         config.assetsUrlPrefix = normalizedBaseUrl
         config.motionCaptureResourceUrl = normalizedBaseUrl
+        config.apiMockBaseUrl = normalizedBaseUrl
         config.enableOfflineApiMock = true
         config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true
@@ -507,6 +508,7 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         }
         config.assetsUrlPrefix = normalizedBaseUrl
         config.motionCaptureResourceUrl = normalizedBaseUrl
+        config.apiMockBaseUrl = normalizedBaseUrl
         config.enableOfflineApiMock = false
         config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true

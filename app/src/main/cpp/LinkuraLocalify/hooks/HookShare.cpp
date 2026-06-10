@@ -742,6 +742,17 @@ namespace LinkuraLocal::HookShare {
     uintptr_t ActivityRecordGetTopWithHttpInfoAsync_MoveNext_Addr = 0;
 
     // http request log
+    static bool IsSelfhostDelegatedApiPath(const std::string& apiPath) {
+        return apiPath == "/v1/archive/withlive_info"
+            || apiPath == "/v1/archive/get_fes_timeline_data"
+            || apiPath == "/v1/withstation/withstation_info";
+    }
+
+    static std::string GetApiMockBaseUrl() {
+        if (!Config::apiMockBaseUrl.empty()) return Config::apiMockBaseUrl;
+        return Config::assetsUrlPrefix;
+    }
+
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
             Il2cppUtils::Il2CppString* path, void* method,
             void* queryParams, void* postBody,
@@ -762,6 +773,14 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
 
         if (Config::enableOfflineApiMock && path) {
+            if (IsSelfhostDelegatedApiPath(strPath) && !GetApiMockBaseUrl().empty()) {
+                AppendOfficialRequestAudit("selfhost_api_delegate", strPath, {{"request", strBody}, {"base_url", GetApiMockBaseUrl()}});
+                Log::WarnFmt("[SelfhostAudit] selfhost_api_delegate path=%s base=%s",
+                             strPath.c_str(), GetApiMockBaseUrl().c_str());
+                return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
+                                                  headerParams, formParams, fileParams, pathParams,
+                                                  contentType, cancellationToken, method_info);
+            }
             AppendOfficialRequestAudit("offline_api_mock_request", strPath, {{"request", strBody}});
             Log::WarnFmt("[SelfhostAudit] offline_api_mock_request path=%s request=%s",
                          strPath.c_str(), strBody.c_str());
@@ -926,7 +945,7 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void* , ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        if (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay)) {
+        if (!Config::enableOfflineApiMock && (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay))) {
             return nullptr;
         }
         return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Orig(self,
@@ -965,9 +984,15 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
+        if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
+            return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
+        }
         return nullptr;
     }
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
+        if (Config::enableOfflineApiMock && !GetApiMockBaseUrl().empty()) {
+            return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
+        }
         return nullptr;
     }
 
@@ -1029,6 +1054,20 @@ namespace LinkuraLocal::HookShare {
             }
         }
         Configuration_set_UserAgent_Orig(self, value ,mtd);
+    }
+
+    DEFINE_HOOK(Il2cppUtils::Il2CppString*, Configuration_get_BasePath, (void* self, void* mtd)) {
+        auto result = Configuration_get_BasePath_Orig(self, mtd);
+        if (Config::enableOfflineApiMock) {
+            const auto baseUrl = GetApiMockBaseUrl();
+            if (!baseUrl.empty()) {
+                Log::WarnFmt("[SelfhostAudit] Configuration_get_BasePath replaced %s -> %s",
+                             result ? result->ToString().c_str() : "(null)",
+                             baseUrl.c_str());
+                return Il2cppUtils::Il2CppString::New(baseUrl);
+            }
+        }
+        return result;
     }
 
 //    DEFINE_HOOK(void, AssetManager_SynchronizeResourceVersion_MoveNext, (void* self, void* mtd)) {
@@ -1220,6 +1259,7 @@ namespace LinkuraLocal::HookShare {
 #pragma region oldVersion
         ADD_HOOK(Configuration_AddDefaultHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "AddDefaultHeader"));
         ADD_HOOK(Configuration_set_UserAgent, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_UserAgent"));
+        ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
 //        ADD_HOOK(AssetManager_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "Hailstorm", "AssetManager", "SynchronizeResourceVersion"));
         ADD_HOOK(Core_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "", "Core", "SynchronizeResourceVersion"));
         ADD_HOOK(Application_get_version, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Application::get_version"));

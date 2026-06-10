@@ -114,6 +114,7 @@ message ConfigUpdate {
   optional bool enable_offline_api_mock = 48;
   optional bool dump_http_mock_json = 49;
   map<int32, int32> mock_item_num_overrides = 50;
+  optional string api_mock_base_url = 51;
 }
 
 // Overlay control actions

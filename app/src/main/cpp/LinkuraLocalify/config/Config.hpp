@@ -69,6 +69,7 @@ namespace LinkuraLocal::Config {
     // to return a locally constructed RestSharp response without sending HTTP requests.
     extern bool enableOfflineApiMock;
     extern bool dumpHttpMockJson;
+    extern std::string apiMockBaseUrl;
     extern std::unordered_map<int, int> mockItemNumOverrides;
 
     extern std::unordered_map<std::string, nlohmann::json> archiveConfigMap;

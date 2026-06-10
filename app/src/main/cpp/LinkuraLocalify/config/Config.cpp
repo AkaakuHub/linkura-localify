@@ -63,6 +63,7 @@ namespace LinkuraLocal::Config {
     // Offline API mock defaults (disabled by default).
     bool enableOfflineApiMock = false;
     bool dumpHttpMockJson = false;
+    std::string apiMockBaseUrl;
     std::unordered_map<int, int> mockItemNumOverrides;
     
     // Archive configuration mapping: archives_id -> item data
@@ -136,6 +137,7 @@ namespace LinkuraLocal::Config {
             GetConfigItem(localeCode);
             GetConfigItem(enableOfflineApiMock);
             GetConfigItem(dumpHttpMockJson);
+            GetConfigItem(apiMockBaseUrl);
             mockItemNumOverrides.clear();
             if (config.contains("mockItemNumOverrides") && config["mockItemNumOverrides"].is_object()) {
                 for (const auto& [itemIdText, itemNumJson] : config["mockItemNumOverrides"].items()) {
@@ -238,6 +240,7 @@ namespace LinkuraLocal::Config {
                 if (configUpdate.has_story_replace_content()) storyReplaceContent = configUpdate.story_replace_content();
                 if (configUpdate.has_enable_offline_api_mock()) enableOfflineApiMock = configUpdate.enable_offline_api_mock();
                 if (configUpdate.has_dump_http_mock_json()) dumpHttpMockJson = configUpdate.dump_http_mock_json();
+                if (configUpdate.has_api_mock_base_url()) apiMockBaseUrl = configUpdate.api_mock_base_url();
                 mockItemNumOverrides.clear();
                 for (const auto& [itemId, itemNum] : configUpdate.mock_item_num_overrides()) {
                     mockItemNumOverrides[itemId] = itemNum;
