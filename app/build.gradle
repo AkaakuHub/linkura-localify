@@ -7,78 +7,6 @@ plugins {
     id("com.google.protobuf") version "0.9.5"
 }
 
-import groovy.json.JsonOutput
-
-def mockItemAssetsDir = layout.buildDirectory.dir("generated/mockItemAssets")
-def generateMockItemCatalog = tasks.register("generateMockItemCatalog") {
-    def seedFile = file("src/main/cpp/LinkuraLocalify/http-mock/backend/seed/001_init.sql")
-    inputs.file(seedFile)
-    outputs.dir(mockItemAssetsDir)
-
-    doLast {
-        def outputDir = mockItemAssetsDir.get().asFile
-        outputDir.mkdirs()
-        def items = []
-        def sqlText = seedFile.getText("UTF-8")
-        def statements = []
-        def statement = new StringBuilder()
-        def statementInString = false
-        for (int i = 0; i < sqlText.length(); i++) {
-            def ch = sqlText.charAt(i)
-            statement.append(ch)
-            if (ch == "'".charAt(0)) {
-                if (statementInString && i + 1 < sqlText.length() && sqlText.charAt(i + 1) == "'".charAt(0)) {
-                    statement.append("'")
-                    i++
-                } else {
-                    statementInString = !statementInString
-                }
-            } else if (ch == ";".charAt(0) && !statementInString) {
-                statements.add(statement.toString())
-                statement.setLength(0)
-            }
-        }
-
-        statements.each { sql ->
-            def normalizedSql = sql.trim()
-            if (normalizedSql.startsWith("INSERT OR REPLACE INTO item ")) {
-                def valuesText = normalizedSql.substring(normalizedSql.indexOf(" VALUES (") + " VALUES (".length(), normalizedSql.lastIndexOf(");"))
-                def values = []
-                def current = new StringBuilder()
-                def inString = false
-                for (int i = 0; i < valuesText.length(); i++) {
-                    def ch = valuesText.charAt(i)
-                    if (ch == "'".charAt(0)) {
-                        if (inString && i + 1 < valuesText.length() && valuesText.charAt(i + 1) == "'".charAt(0)) {
-                            current.append("'")
-                            i++
-                        } else {
-                            inString = !inString
-                        }
-                    } else if (ch == ",".charAt(0) && !inString) {
-                        values.add(current.toString().trim())
-                        current.setLength(0)
-                    } else {
-                        current.append(ch)
-                    }
-                }
-                values.add(current.toString().trim())
-                items.add([
-                    itemId: values[2].toInteger(),
-                    itemType: values[3].toInteger(),
-                    itemCategory: values[4].toInteger(),
-                    rarity: values[5].toInteger(),
-                    name: values[6],
-                    nameFurigana: values[7],
-                    defaultItemNum: values[14].toInteger(),
-                    resourceFileName: values[17]
-                ])
-            }
-        }
-        file("${outputDir}/mock_items.json").text = JsonOutput.toJson(items)
-    }
-}
-
 android {
     namespace 'io.github.chocolzs.linkura.localify'
     compileSdk 34
@@ -148,7 +76,6 @@ android {
 
     sourceSets {
         main {
-            assets.srcDir(mockItemAssetsDir)
             proto {
                 srcDir 'src/main/proto'
             }
@@ -159,9 +86,6 @@ android {
     }
 
     applicationVariants.configureEach { variant ->
-        variant.mergeAssetsProvider.configure {
-            it.dependsOn(generateMockItemCatalog)
-        }
         variant.mergeAssetsProvider.configure { mergeAssetsTask ->
             mergeAssetsTask.doLast {
                delete(fileTree(dir: mergeAssetsTask.outputDir, includes: [

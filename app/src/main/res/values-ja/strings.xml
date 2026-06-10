@@ -557,23 +557,5 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="check_selfhost_connection">セルフホスト疎通確認</string>
     <string name="selfhost_connection_checking">セルフホスト疎通確認中...</string>
     <string name="enable_offline_api_mock">セルフホストAPIサーバーを使う</string>
-    <string name="dump_http_mock_json">APIレスポンスを記録する</string>
-    <string name="offline_api_mock_dir">Mock ディレクトリ名</string>
-    <string name="offline_api_mock_dir_hint">アプリのファイル配下 `linkura-local/` からの相対パス（例: mock_api）。</string>
     <string name="local_mode_hint_collapsed">タイトルをタップして展開します。</string>
-    <string name="reset_mock_database">データベースをリセット</string>
-    <string name="reset_mock_database_confirm_title">データベースをリセット</string>
-    <string name="reset_mock_database_confirm_content">データベース内のすべてのデータを削除し、組み込みの初期データを復元します。続けますか？</string>
-    <string name="rebuild_mock_database">データベースを再構築</string>
-    <string name="rebuild_mock_database_confirm_title">データベースを再構築</string>
-    <string name="rebuild_mock_database_confirm_content">データベースファイルを削除し、最初から再構築します（schema + seed）。続けますか？</string>
-    <string name="mock_item_num_overrides">アイテム個数の上書き</string>
-    <string name="mock_item_id">アイテムID</string>
-    <string name="mock_item_num">個数</string>
-    <string name="apply_mock_item_num">適用</string>
-    <string name="remove_mock_item_num">削除</string>
-    <string name="mock_item_override_row_item">アイテムID: %1$d</string>
-    <string name="mock_item_search">アイテム名またはIDで検索</string>
-    <string name="mock_item_search_result_detail">ID: %1$d / 初期値: %2$d</string>
-    <string name="select_mock_item">選択</string>
 </resources>

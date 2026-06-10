@@ -79,10 +79,8 @@ import io.github.chocolzs.linkura.localify.ui.components.GakuProgressBar
 import io.github.chocolzs.linkura.localify.ui.components.GakuRadio
 import io.github.chocolzs.linkura.localify.ui.components.GakuSwitch
 import io.github.chocolzs.linkura.localify.ui.components.GakuTextInput
-import io.github.chocolzs.linkura.localify.ui.components.MockItemNumEditor
 import io.github.chocolzs.linkura.localify.ui.components.base.AutoSizeText
 import io.github.chocolzs.linkura.localify.LinkuraHookMain
-import java.io.File
 
 
 @Composable
@@ -251,64 +249,6 @@ fun HomePage(modifier: Modifier = Modifier,
                             ) { v ->
                                 context?.onEnableOfflineApiMockChanged(v)
                             }
-                            GakuSwitch(
-                                modifier,
-                                stringResource(R.string.dump_http_mock_json),
-                                checked = config.value.dumpHttpMockJson
-                            ) { v ->
-                                context?.onDumpHttpMockJsonChanged(v)
-                            }
-                            val resetTitle = stringResource(R.string.reset_mock_database_confirm_title)
-                            val resetContent = stringResource(R.string.reset_mock_database_confirm_content)
-                            val rebuildTitle = stringResource(R.string.rebuild_mock_database_confirm_title)
-                            val rebuildContent = stringResource(R.string.rebuild_mock_database_confirm_content)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                GakuButton(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp),
-                                    text = stringResource(R.string.reset_mock_database),
-                                    onClick = {
-                                        context?.mainUIConfirmStatUpdate(
-                                            isShow = true,
-                                            title = resetTitle,
-                                            content = resetContent,
-                                            onConfirm = {
-                                                context?.let { ctx ->
-                                                    File(ctx.filesDir, "mock_db_cmd").writeText("reset")
-                                                }
-                                            }
-                                        )
-                                    }
-                                )
-                                GakuButton(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp),
-                                    text = stringResource(R.string.rebuild_mock_database),
-                                    onClick = {
-                                        context?.mainUIConfirmStatUpdate(
-                                            isShow = true,
-                                            title = rebuildTitle,
-                                            content = rebuildContent,
-                                            onConfirm = {
-                                                context?.let { ctx ->
-                                                    File(ctx.filesDir, "mock_db_cmd").writeText("rebuild")
-                                                }
-                                            }
-                                        )
-                                    }
-                                )
-                            }
-                            MockItemNumEditor(
-                                overrides = config.value.mockItemNumOverrides,
-                                onOverrideChanged = { itemId, itemNum ->
-                                    context?.onMockItemNumOverrideChanged(itemId, itemNum)
-                                }
-                            )
                         }
                     }
                 }

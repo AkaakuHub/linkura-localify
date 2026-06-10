@@ -70,8 +70,6 @@ interface ConfigListener {
     fun onCustomClientVersionChanged(value: String)
     fun onCustomResVersionChanged(value: String)
     fun onEnableOfflineApiMockChanged(value: Boolean)
-    fun onDumpHttpMockJsonChanged(value: Boolean)
-    fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?)
     fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String)
     fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String)
 
@@ -467,24 +465,6 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         sendConfigUpdate(config)
     }
 
-    override fun onDumpHttpMockJsonChanged(value: Boolean) {
-        config.dumpHttpMockJson = value
-        saveConfig()
-        sendConfigUpdate(config)
-    }
-
-    override fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?) {
-        val overrides = config.mockItemNumOverrides.toMutableMap()
-        if (itemNum == null) {
-            overrides.remove(itemId)
-        } else {
-            overrides[itemId] = itemNum
-        }
-        config.mockItemNumOverrides = overrides.toSortedMap()
-        saveConfig()
-        sendConfigUpdate(config)
-    }
-
     override fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String) {
         val normalizedApiBaseUrl = apiBaseUrl.trim().trimEnd('/')
         val normalizedAssetBaseUrl = assetBaseUrl.trim().trimEnd('/')
@@ -495,7 +475,6 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.motionCaptureResourceUrl = normalizedAssetBaseUrl
         config.apiMockBaseUrl = normalizedApiBaseUrl
         config.enableOfflineApiMock = true
-        config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true
         config.unlockAfter = true
         saveConfig()
@@ -512,7 +491,6 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.motionCaptureResourceUrl = normalizedAssetBaseUrl
         config.apiMockBaseUrl = normalizedApiBaseUrl
         config.enableOfflineApiMock = false
-        config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true
         config.unlockAfter = true
         saveConfig()

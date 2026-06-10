@@ -64,13 +64,8 @@ namespace LinkuraLocal::Config {
     extern bool avoidAccidentalTouch;
     extern std::string localeCode;
 
-    // Offline API mock (no-network) for local integration testing.
-    // When enabled, `Org.OpenAPITools.Client.ApiClient.CallApiAsync` can be short-circuited
-    // to return a locally constructed RestSharp response without sending HTTP requests.
     extern bool enableOfflineApiMock;
-    extern bool dumpHttpMockJson;
     extern std::string apiMockBaseUrl;
-    extern std::unordered_map<int, int> mockItemNumOverrides;
 
     extern std::unordered_map<std::string, nlohmann::json> archiveConfigMap;
     extern VersionCompatibility::Version currentClientVersion;

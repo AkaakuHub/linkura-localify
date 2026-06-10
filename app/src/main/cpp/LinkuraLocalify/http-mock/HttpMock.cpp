@@ -1,17 +1,9 @@
 #include "HttpMock.hpp"
 
 #include "../HookMain.h"
-#include "../Local.h"
 
-#include "RouteRegistry.hpp"
-#include "offline_api_mock_builtin.hpp"
-
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <ctime>
 #include <mutex>
-#include <optional>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -20,15 +12,6 @@ extern jclass g_linkuraHookMainClass;
 
 namespace LinkuraLocal::HttpMock {
     namespace {
-        static void ReplaceAllInPlace(std::string& s, const std::string& from, const std::string& to) {
-            if (from.empty()) return;
-            size_t pos = 0;
-            while ((pos = s.find(from, pos)) != std::string::npos) {
-                s.replace(pos, from.size(), to);
-                pos += to.size();
-            }
-        }
-
         static std::string TrimAscii(std::string s) {
             auto isSpace = [](unsigned char c) {
                 return c == ' ' || c == '\t' || c == '\r' || c == '\n';
@@ -61,74 +44,6 @@ namespace LinkuraLocal::HttpMock {
             char buf[64]{};
             std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tmUtc);
             return std::string(buf);
-        }
-
-        static std::string ReadFileToString(const std::filesystem::path& path) {
-            std::ifstream ifs(path, std::ios::binary);
-            if (!ifs) return {};
-            std::stringstream buffer;
-            buffer << ifs.rdbuf();
-            return buffer.str();
-        }
-
-        static std::string SanitizeApiPathToRelative(std::string apiPath) {
-            // If it's a full URL, keep only the path part.
-            if (apiPath.rfind("http://", 0) == 0 || apiPath.rfind("https://", 0) == 0) {
-                const auto schemePos = apiPath.find("://");
-                const auto pathPos = schemePos == std::string::npos ? std::string::npos : apiPath.find('/', schemePos + 3);
-                apiPath = pathPos == std::string::npos ? std::string("root") : apiPath.substr(pathPos);
-            }
-
-            // Strip query string if any.
-            if (auto qpos = apiPath.find('?'); qpos != std::string::npos) {
-                apiPath.resize(qpos);
-            }
-            // Strip fragment if any.
-            if (auto fpos = apiPath.find('#'); fpos != std::string::npos) {
-                apiPath.resize(fpos);
-            }
-            while (!apiPath.empty() && apiPath.front() == '/') apiPath.erase(apiPath.begin());
-            if (apiPath.empty()) apiPath = "root";
-
-            // Make it safe as a file path across platforms.
-            for (auto& ch : apiPath) {
-                const bool ok = (ch >= 'a' && ch <= 'z')
-                             || (ch >= 'A' && ch <= 'Z')
-                             || (ch >= '0' && ch <= '9')
-                             || ch == '/' || ch == '_' || ch == '-' || ch == '.';
-                if (!ok) ch = '_';
-            }
-
-            // Prevent path traversal.
-            std::filesystem::path rel(apiPath);
-            if (rel.is_absolute()) return {};
-            for (const auto& part : rel) {
-                if (part == "..") return {};
-            }
-
-            // Always treat it as a json mock.
-            if (rel.extension() != ".json") {
-                rel += ".json";
-            }
-            return rel.generic_string();
-        }
-
-        static std::filesystem::path GetMockRootDir() {
-            const auto base = LinkuraLocal::Local::GetBasePath();
-            return (base / "mock_api").lexically_normal();
-        }
-
-        static std::filesystem::path GetMockFilePath(const std::string& apiPath) {
-            const auto rel = SanitizeApiPathToRelative(apiPath);
-            if (rel.empty()) return {};
-            return (GetMockRootDir() / std::filesystem::path(rel)).lexically_normal();
-        }
-
-        static std::filesystem::path GetMockHeadersFilePath(const std::string& apiPath) {
-            auto p = GetMockFilePath(apiPath);
-            if (p.empty()) return {};
-            p.replace_extension(".headers");
-            return p;
         }
 
         static std::vector<std::pair<std::string, std::string>> ParseHeadersText(std::string text) {
@@ -177,18 +92,6 @@ namespace LinkuraLocal::HttpMock {
             UpsertHeader(headers, "date", dateStr);
             UpsertHeader(headers, "server", "Google Frontend");
             UpsertHeader(headers, "Transfer-Encoding", "chunked");
-        }
-
-        static void ApplyMockItemHeaders(std::vector<std::pair<std::string, std::string>>& headers) {
-            const auto paidSisca = Config::mockItemNumOverrides.find(1001001);
-            if (paidSisca != Config::mockItemNumOverrides.end()) {
-                UpsertHeader(headers, "jewel_paid_google", std::to_string(paidSisca->second));
-            }
-
-            const auto freeSisca = Config::mockItemNumOverrides.find(1002001);
-            if (freeSisca != Config::mockItemNumOverrides.end()) {
-                UpsertHeader(headers, "jewel_free", std::to_string(freeSisca->second));
-            }
         }
 
         struct Methods {
@@ -729,130 +632,4 @@ namespace LinkuraLocal::HttpMock {
         return TaskFromResultObject(resp);
     }
 
-    void* CreateMockTaskForApiPath(const std::string& apiPath, const std::string& requestBodyJson) {
-        const auto mockFile = GetMockFilePath(apiPath);
-        const auto mockFileStr = mockFile.empty() ? std::string("(invalid path)") : mockFile.string();
-        const auto headersFile = GetMockHeadersFilePath(apiPath);
-        const auto headersFileStr = headersFile.empty() ? std::string("(invalid path)") : headersFile.string();
-        std::optional<MockResponse> routeResponse;
-        int httpStatusCode = 200;
-        std::string statusDescription = "OK (offline mock)";
-
-        std::string mockJson;
-        if (!mockFile.empty()) {
-            mockJson = ReadFileToString(mockFile);
-        }
-
-        if (mockJson.empty()) {
-            routeResponse = ResolveRegisteredRoute(MockRequestContext{ apiPath, requestBodyJson });
-            if (routeResponse.has_value()) {
-                mockJson = routeResponse->body;
-                httpStatusCode = routeResponse->statusCode;
-                statusDescription = routeResponse->statusDescription;
-                Log::InfoFmt("[HttpMock] resolved registered route for path=%s", apiPath.c_str());
-            } else {
-                Log::WarnFmt("[HttpMock] no mock file or registered route for path=%s, returning nullptr",
-                             apiPath.c_str());
-                return nullptr;
-            }
-        } else {
-            if (Config::dbgMode || Config::enableOfflineApiMock) {
-                Log::InfoFmt("[HttpMock] hit %s", mockFileStr.c_str());
-            }
-        }
-
-        if (Config::dumpHttpMockJson) {
-            const auto dumpDir = GetMockRootDir().parent_path() / "mock_dump";
-            std::error_code dumpEc;
-            std::filesystem::create_directories(dumpDir, dumpEc);
-            if (!dumpEc) {
-                auto sanitized = SanitizeApiPathToRelative(apiPath);
-                for (auto& ch : sanitized) { if (ch == '/') ch = '_'; }
-                const auto filePath = dumpDir / (sanitized + ".json");
-
-                nlohmann::json dumpObj;
-                if (!requestBodyJson.empty()) {
-                    auto reqParsed = nlohmann::json::parse(requestBodyJson, nullptr, false);
-                    dumpObj["request"] = reqParsed.is_discarded() ? nlohmann::json(requestBodyJson) : reqParsed;
-                } else {
-                    dumpObj["request"] = nullptr;
-                }
-                auto respParsed = nlohmann::json::parse(mockJson, nullptr, false);
-                dumpObj["response"] = respParsed.is_discarded() ? nlohmann::json(mockJson) : respParsed;
-
-                std::ofstream dumpOfs(filePath, std::ios::trunc);
-                if (dumpOfs.is_open()) {
-                    dumpOfs << dumpObj.dump(2);
-                }
-            }
-        }
-
-        // Headers: disk overrides -> built-in -> defaults. Then enforce standard required headers.
-        std::string headersText;
-        if (!headersFile.empty()) {
-            headersText = ReadFileToString(headersFile);
-        }
-        if (headersText.empty()) {
-            if (routeResponse.has_value() && !routeResponse->headersText.empty()) {
-                headersText = routeResponse->headersText;
-                Log::InfoFmt("[HttpMock] using registered route headers for path=%s", apiPath.c_str());
-            } else {
-                headersText = OfflineApiMockBuiltIn::DefaultHeaders;
-                if (!headersFile.empty()) {
-                    Log::WarnFmt("[HttpMock] missing headers file for path=%s (expected: %s), using defaults",
-                                 apiPath.c_str(),
-                                 headersFileStr.c_str());
-                }
-            }
-        } else {
-            if (Config::dbgMode || Config::enableOfflineApiMock) {
-                Log::InfoFmt("[HttpMock] hit %s", headersFileStr.c_str());
-            }
-        }
-
-        // Expand placeholders inside header files.
-        {
-            const auto dateStr = FormatHttpDateNowGmt();
-            const auto resVer = !Config::latestResVersion.empty() ? Config::latestResVersion : Config::currentResVersion;
-            ReplaceAllInPlace(headersText, "${DATE_GMT}", dateStr);
-            ReplaceAllInPlace(headersText, "${RES_VERSION}", resVer.empty() ? std::string("unknown") : resVer);
-        }
-
-        auto headerPairs = ParseHeadersText(headersText);
-        ApplyMockItemHeaders(headerPairs);
-        ApplyStandardHeaders(headerPairs);
-
-        // // Debug dump resolved header pairs (after placeholder expansion and standard upsert).
-        // // Throttled: print at most once per apiPath to avoid spamming logcat.
-        // if (Config::dbgMode || Config::enableOfflineApiMock) {
-        //     static std::mutex s_mtx;
-        //     static std::unordered_set<std::string> s_dumped;
-        //     bool shouldDump = false;
-        //     {
-        //         std::lock_guard<std::mutex> _l(s_mtx);
-        //         shouldDump = s_dumped.insert(apiPath).second;
-        //     }
-        //     if (shouldDump) {
-        //         Log::InfoFmt("[HttpMock] headerPairs path=%s count=%d", apiPath.c_str(), (int)headerPairs.size());
-        //         for (int i = 0; i < (int)headerPairs.size(); ++i) {
-        //             const auto& kv = headerPairs[(size_t)i];
-        //             Log::VerboseFmt("[HttpMock] header[%d] %s: %s", i, kv.first.c_str(), kv.second.c_str());
-        //         }
-        //     }
-        // }
-
-        auto resp = CreateRestResponse(mockJson, httpStatusCode, statusDescription, headerPairs);
-        if (!resp) {
-            Log::Error("[HttpMock] failed to create RestResponse, returning empty json response");
-            std::vector<std::pair<std::string, std::string>> fallbackHeaders;
-            ApplyStandardHeaders(fallbackHeaders);
-            resp = CreateRestResponse("{}", 200, "OK (offline mock)", fallbackHeaders);
-        }
-
-        if (Config::dbgMode || Config::enableOfflineApiMock) {
-            Log::InfoFmt("[HttpMock] creating completed Task<object> for resp=%p path=%s", resp, apiPath.c_str());
-        }
-
-        return TaskFromResultObject(resp);
-    }
 }
