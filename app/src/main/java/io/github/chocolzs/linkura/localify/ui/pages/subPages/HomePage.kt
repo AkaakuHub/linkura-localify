@@ -97,6 +97,7 @@ fun HomePage(modifier: Modifier = Modifier,
     }
 
     var localModeExpanded by rememberSaveable { mutableStateOf(false) }
+    var selfhostBaseUrl by rememberSaveable { mutableStateOf(config.value.assetsUrlPrefix) }
     val localModeArrowRotation by animateFloatAsState(
         targetValue = if (localModeExpanded) 180f else 0f,
         animationSpec = tween(durationMillis = 250),
@@ -162,6 +163,24 @@ fun HomePage(modifier: Modifier = Modifier,
                             modifier = Modifier.padding(start = 4.dp, end = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            GakuTextInput(
+                                value = selfhostBaseUrl,
+                                onValueChange = { value ->
+                                    selfhostBaseUrl = value
+                                },
+                                label = {
+                                    Text(text = stringResource(R.string.selfhost_base_url))
+                                }
+                            )
+                            GakuButton(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                text = stringResource(R.string.apply_selfhost_local_mode),
+                                onClick = {
+                                    context?.onApplySelfhostLocalMode(selfhostBaseUrl)
+                                }
+                            )
                             GakuSwitch(
                                 modifier,
                                 stringResource(R.string.enable_offline_api_mock),

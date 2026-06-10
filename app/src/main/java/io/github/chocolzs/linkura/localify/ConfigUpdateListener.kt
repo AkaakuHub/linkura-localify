@@ -72,6 +72,7 @@ interface ConfigListener {
     fun onEnableOfflineApiMockChanged(value: Boolean)
     fun onDumpHttpMockJsonChanged(value: Boolean)
     fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?)
+    fun onApplySelfhostLocalMode(baseUrl: String)
 
     fun onPUseRemoteAssetsChanged(value: Boolean)
     fun onPCleanLocalAssetsChanged(value: Boolean)
@@ -479,6 +480,20 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
             overrides[itemId] = itemNum
         }
         config.mockItemNumOverrides = overrides.toSortedMap()
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onApplySelfhostLocalMode(baseUrl: String) {
+        val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+        if (normalizedBaseUrl.isEmpty()) {
+            return
+        }
+        config.assetsUrlPrefix = normalizedBaseUrl
+        config.motionCaptureResourceUrl = normalizedBaseUrl
+        config.enableOfflineApiMock = true
+        config.dumpHttpMockJson = true
+        config.enableMotionCaptureReplay = true
         saveConfig()
         sendConfigUpdate(config)
     }
