@@ -40,6 +40,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 import kotlin.system.measureTimeMillis
+import org.json.JSONArray
+import org.json.JSONObject
 import io.github.chocolzs.linkura.localify.hookUtils.FileHotUpdater
 import io.github.chocolzs.linkura.localify.hookUtils.FilesChecker.getInstalledVersion
 import io.github.chocolzs.linkura.localify.hookUtils.FilesChecker.getPluginVersion
@@ -1215,7 +1217,19 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 if (statusCode !in 200..299) {
                     throw IllegalStateException("selfhost API failed: $statusCode $body")
                 }
-                body
+                val headers = JSONArray()
+                connection.headerFields.forEach { (name, values) ->
+                    if (name != null) {
+                        values.orEmpty().forEach { value ->
+                            headers.put(JSONObject().put("name", name).put("value", value))
+                        }
+                    }
+                }
+                JSONObject()
+                    .put("statusCode", statusCode)
+                    .put("body", body)
+                    .put("headers", headers)
+                    .toString()
             } finally {
                 connection.disconnect()
             }

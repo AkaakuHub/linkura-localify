@@ -136,6 +136,12 @@ namespace LinkuraLocal::HttpMock {
             UnityResolve::Method* encodingGetBytes = nullptr;
         };
 
+        struct SelfhostApiResponse {
+            std::string body;
+            std::vector<std::pair<std::string, std::string>> headers;
+            int statusCode = 200;
+        };
+
         static int ResolveEnumValue(void* enumKlass, const char* fieldName, int fallback) {
             if (!enumKlass || !fieldName) return fallback;
             Il2cppUtils::FieldInfo* field = nullptr;
@@ -561,9 +567,9 @@ namespace LinkuraLocal::HttpMock {
             return task;
         }
 
-        static std::string FetchSelfhostApiJson(const std::string& baseUrl,
-                                                const std::string& apiPath,
-                                                const std::string& requestBodyJson) {
+        static SelfhostApiResponse FetchSelfhostApi(const std::string& baseUrl,
+                                                    const std::string& apiPath,
+                                                    const std::string& requestBodyJson) {
             auto env = Misc::GetJNIEnv();
             if (!env) {
                 Log::Error("[HttpMock] failed to get JNIEnv for selfhost API.");
@@ -592,7 +598,7 @@ namespace LinkuraLocal::HttpMock {
             auto result = static_cast<jstring>(env->CallStaticObjectMethod(
                     klass, methodId, jBaseUrl, jApiPath, jRequestBodyJson));
 
-            std::string body;
+            std::string envelopeText;
             if (env->ExceptionCheck()) {
                 env->ExceptionDescribe();
                 env->ExceptionClear();
@@ -600,7 +606,7 @@ namespace LinkuraLocal::HttpMock {
             } else if (result) {
                 const char* chars = env->GetStringUTFChars(result, nullptr);
                 if (chars) {
-                    body = chars;
+                    envelopeText = chars;
                     env->ReleaseStringUTFChars(result, chars);
                 }
             }
@@ -609,26 +615,44 @@ namespace LinkuraLocal::HttpMock {
             env->DeleteLocalRef(jRequestBodyJson);
             env->DeleteLocalRef(jApiPath);
             env->DeleteLocalRef(jBaseUrl);
-            return body;
+            auto envelope = nlohmann::json::parse(envelopeText, nullptr, false);
+            if (!envelope.is_object()) {
+                Log::ErrorFmt("[HttpMock] invalid selfhost API envelope path=%s", apiPath.c_str());
+                return {};
+            }
+
+            SelfhostApiResponse response;
+            response.statusCode = envelope.value("statusCode", 200);
+            response.body = envelope.value("body", std::string());
+            if (envelope.contains("headers") && envelope["headers"].is_array()) {
+                for (const auto& header : envelope["headers"]) {
+                    if (!header.is_object()) continue;
+                    const auto name = header.value("name", std::string());
+                    const auto value = header.value("value", std::string());
+                    if (!name.empty()) {
+                        response.headers.emplace_back(name, value);
+                    }
+                }
+            }
+            return response;
         }
 
     } // namespace
 
     void* CreateSelfhostApiTask(const std::string& baseUrl, const std::string& apiPath, const std::string& requestBodyJson) {
-        const auto jsonBody = FetchSelfhostApiJson(baseUrl, apiPath, requestBodyJson);
-        if (jsonBody.empty()) {
+        auto apiResponse = FetchSelfhostApi(baseUrl, apiPath, requestBodyJson);
+        if (apiResponse.body.empty()) {
             Log::ErrorFmt("[HttpMock] empty selfhost API response path=%s", apiPath.c_str());
             return nullptr;
         }
 
-        std::vector<std::pair<std::string, std::string>> headerPairs;
-        ApplyStandardHeaders(headerPairs);
-        auto resp = CreateRestResponse(jsonBody, 200, "OK (selfhost)", headerPairs);
+        ApplyStandardHeaders(apiResponse.headers);
+        auto resp = CreateRestResponse(apiResponse.body, apiResponse.statusCode, "OK (selfhost)", apiResponse.headers);
         if (!resp) {
             Log::ErrorFmt("[HttpMock] failed to create selfhost RestResponse path=%s", apiPath.c_str());
             return nullptr;
         }
-        Log::WarnFmt("[SelfhostAudit] selfhost_api_response path=%s bytes=%d", apiPath.c_str(), (int)jsonBody.size());
+        Log::WarnFmt("[SelfhostAudit] selfhost_api_response path=%s bytes=%d headers=%d", apiPath.c_str(), (int)apiResponse.body.size(), (int)apiResponse.headers.size());
         return TaskFromResultObject(resp);
     }
 
