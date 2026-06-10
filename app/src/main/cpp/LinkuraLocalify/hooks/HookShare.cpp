@@ -159,7 +159,7 @@ namespace LinkuraLocal::HookShare {
         }
 
         void AppendOfficialApiResponseDump(const nlohmann::json& responseJson, void* type) {
-            if (!Config::dumpHttpMockJson || Config::enableOfflineApiMock) {
+            if (Config::enableOfflineApiMock || Config::assetsUrlPrefix.empty()) {
                 return;
             }
 
