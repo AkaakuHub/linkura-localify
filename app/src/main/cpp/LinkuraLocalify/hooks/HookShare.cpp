@@ -11,6 +11,10 @@
 
 namespace LinkuraLocal::HookShare {
     namespace {
+        std::mutex apiAuditContextMutex;
+        std::string lastOfficialApiPath;
+        std::string lastOfficialApiRequest;
+
         static void DumpRestResponseHeadersIfPossible(void* response) {
             if (!response) return;
 
@@ -138,6 +142,52 @@ namespace LinkuraLocal::HookShare {
             }
 
             // Log::VerboseFmt("[ApiClient_Deserialize] response headers dump end response=%p count=%d", response, idx);
+        }
+
+        void RememberOfficialApiRequest(const std::string& path, const std::string& request) {
+            std::lock_guard<std::mutex> lock(apiAuditContextMutex);
+            lastOfficialApiPath = path;
+            lastOfficialApiRequest = request;
+        }
+
+        nlohmann::json CurrentOfficialApiRequestContext() {
+            std::lock_guard<std::mutex> lock(apiAuditContextMutex);
+            return {
+                {"path", lastOfficialApiPath},
+                {"request", lastOfficialApiRequest},
+            };
+        }
+
+        void AppendOfficialApiResponseDump(const nlohmann::json& responseJson, void* type) {
+            if (!Config::dumpHttpMockJson || Config::enableOfflineApiMock) {
+                return;
+            }
+
+            auto context = CurrentOfficialApiRequestContext();
+            nlohmann::json event = {
+                {"request_path", context.value("path", "")},
+                {"request", context.value("request", "")},
+                {"response", responseJson},
+                {"current_client_version", Config::currentClientVersion.toString()},
+                {"current_res_version", Config::currentResVersion},
+            };
+
+            auto klass = UnityResolve::Invoke<void*>("il2cpp_class_from_system_type", type);
+            if (klass) {
+                auto ns = UnityResolve::Invoke<const char*>("il2cpp_class_get_namespace", klass);
+                auto name = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", klass);
+                event["response_type"] = std::string(ns ? ns : "") + "." + (name ? name : "");
+            }
+
+            std::error_code ec;
+            const auto dumpPath = Local::GetBasePath().parent_path() / "official_api_dump.jsonl";
+            std::filesystem::create_directories(dumpPath.parent_path(), ec);
+            static std::mutex dumpMutex;
+            std::lock_guard<std::mutex> lock(dumpMutex);
+            std::ofstream ofs(dumpPath, std::ios::app);
+            if (ofs.is_open()) {
+                ofs << event.dump() << '\n';
+            }
         }
     } // namespace
 
@@ -728,6 +778,7 @@ namespace LinkuraLocal::HookShare {
         }
 
         AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
+        RememberOfficialApiRequest(strPath, strBody);
         Log::ErrorFmt("[SelfhostAudit] official_api_request_allowed path=%s request=%s",
                       strPath.c_str(), strBody.c_str());
 
@@ -744,6 +795,7 @@ namespace LinkuraLocal::HookShare {
         }
         auto result = ApiClient_Deserialize_Orig(self, response, type, method_info);
         auto json = nlohmann::json::parse(Il2cppUtils::ToJsonStr(result)->ToString());
+        AppendOfficialApiResponseDump(json, type);
         if (RewriteOfficialAssetUrls(json)) {
             result = Il2cppUtils::FromJsonStr(json.dump(), type);
         }

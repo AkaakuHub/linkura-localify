@@ -73,6 +73,7 @@ interface ConfigListener {
     fun onDumpHttpMockJsonChanged(value: Boolean)
     fun onMockItemNumOverrideChanged(itemId: Int, itemNum: Int?)
     fun onApplySelfhostLocalMode(baseUrl: String)
+    fun onApplySelfhostAssetCaptureMode(baseUrl: String)
 
     fun onPUseRemoteAssetsChanged(value: Boolean)
     fun onPCleanLocalAssetsChanged(value: Boolean)
@@ -492,6 +493,21 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.assetsUrlPrefix = normalizedBaseUrl
         config.motionCaptureResourceUrl = normalizedBaseUrl
         config.enableOfflineApiMock = true
+        config.dumpHttpMockJson = true
+        config.enableMotionCaptureReplay = true
+        config.unlockAfter = true
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
+    override fun onApplySelfhostAssetCaptureMode(baseUrl: String) {
+        val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+        if (normalizedBaseUrl.isEmpty()) {
+            return
+        }
+        config.assetsUrlPrefix = normalizedBaseUrl
+        config.motionCaptureResourceUrl = normalizedBaseUrl
+        config.enableOfflineApiMock = false
         config.dumpHttpMockJson = true
         config.enableMotionCaptureReplay = true
         config.unlockAfter = true

@@ -195,6 +195,15 @@ fun HomePage(modifier: Modifier = Modifier,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(36.dp),
+                                text = stringResource(R.string.apply_selfhost_asset_capture_mode),
+                                onClick = {
+                                    context?.onApplySelfhostAssetCaptureMode(selfhostBaseUrl)
+                                }
+                            )
+                            GakuButton(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
                                 text = if (selfhostChecking) {
                                     stringResource(R.string.selfhost_connection_checking)
                                 } else {
