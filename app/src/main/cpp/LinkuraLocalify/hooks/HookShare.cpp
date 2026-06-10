@@ -712,16 +712,24 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
 
         if (Config::enableOfflineApiMock && path) {
+            AppendOfficialRequestAudit("offline_api_mock_request", strPath, {{"request", strBody}});
+            Log::WarnFmt("[SelfhostAudit] offline_api_mock_request path=%s request=%s",
+                         strPath.c_str(), strBody.c_str());
             auto task = LinkuraLocal::HttpMock::CreateMockTaskForApiPath(strPath, strBody);
             if (!task) {
                 AppendOfficialRequestAudit("missing_offline_api_mock", strPath, {{"request", strBody}});
-                Log::WarnFmt("[HttpMock] unmatched for path=%s, returning nullptr", strPath.c_str());
+                Log::ErrorFmt("[SelfhostAudit] missing_offline_api_mock path=%s request=%s",
+                              strPath.c_str(), strBody.c_str());
                 return nullptr;
             }
+            Log::WarnFmt("[SelfhostAudit] offline_api_mock_response path=%s task=%p",
+                         strPath.c_str(), task);
             return task;
         }
 
         AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
+        Log::ErrorFmt("[SelfhostAudit] official_api_request_allowed path=%s request=%s",
+                      strPath.c_str(), strBody.c_str());
 
         return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
                                           headerParams, formParams, fileParams, pathParams,

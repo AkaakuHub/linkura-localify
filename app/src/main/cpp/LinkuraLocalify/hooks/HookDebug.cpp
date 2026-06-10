@@ -17,8 +17,24 @@ namespace LinkuraLocal::HookDebug {
 
     DEFINE_HOOK(void, Internal_Log, (int logType, int logOption, UnityResolve::UnityType::String* content, void* context)) {
         Internal_Log_Orig(logType, logOption, content, context);
-        // 2022.3.21f1
-        Log::LogUnityLog(ANDROID_LOG_VERBOSE, "Internal_Log:\n%s", content->ToString().c_str());
+        const auto message = content ? content->ToString() : std::string("(null)");
+        const bool looksImportant =
+            logType == 0 ||
+            message.find("ネットワーク接続エラー") != std::string::npos ||
+            message.find("Network") != std::string::npos ||
+            message.find("network") != std::string::npos ||
+            message.find("Exception") != std::string::npos ||
+            message.find("Error") != std::string::npos ||
+            message.find("error") != std::string::npos;
+        if (looksImportant) {
+            Log::LogUnityLog(ANDROID_LOG_WARN, "SelfhostAudit UnityLog type=%d option=%d:\n%s", logType, logOption, message.c_str());
+            HookShare::AppendOfficialRequestAudit("unity_important_log", message, {
+                {"log_type", logType},
+                {"log_option", logOption},
+            });
+        } else {
+            Log::LogUnityLog(ANDROID_LOG_VERBOSE, "Internal_Log:\n%s", message.c_str());
+        }
     }
 
     // 👀
