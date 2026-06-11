@@ -153,10 +153,14 @@ namespace LinkuraLocal::HookShare {
             // Log::VerboseFmt("[ApiClient_Deserialize] response headers dump end response=%p count=%d", response, idx);
         }
 
-        std::string SerializeForAudit(void* object) {
+        std::string DescribeObjectForAudit(void* object) {
             if (!object) return "";
-            auto json = Il2cppUtils::ToJsonStr(object);
-            return json ? json->ToString() : "";
+            const auto klass = Il2cppUtils::get_class_from_instance(object);
+            if (!klass || !klass->name) return "(unknown)";
+            if (klass->namespaze && std::strlen(klass->namespaze) > 0) {
+                return std::string(klass->namespaze) + "." + klass->name;
+            }
+            return klass->name;
         }
 
         void RememberOfficialApiRequest(const std::string& path, const nlohmann::json& request) {
@@ -781,14 +785,14 @@ namespace LinkuraLocal::HookShare {
         }
         nlohmann::json requestAudit = {
             {"request", strBody},
-            {"method", SerializeForAudit(method)},
-            {"query_params", SerializeForAudit(queryParams)},
-            {"form_params", SerializeForAudit(formParams)},
-            {"path_params", SerializeForAudit(pathParams)},
+            {"method_type", DescribeObjectForAudit(method)},
+            {"query_params_type", DescribeObjectForAudit(queryParams)},
+            {"form_params_type", DescribeObjectForAudit(formParams)},
+            {"path_params_type", DescribeObjectForAudit(pathParams)},
             {"content_type", contentType ? contentType->ToString() : ""},
         };
-        Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s\nquery: %s",
-                        strPath.c_str(), strBody.c_str(), requestAudit["query_params"].get<std::string>().c_str());
+        Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s\nquery_type: %s",
+                        strPath.c_str(), strBody.c_str(), requestAudit["query_params_type"].get<std::string>().c_str());
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
