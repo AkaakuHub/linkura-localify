@@ -137,7 +137,16 @@ namespace LinkuraLocal::HookShare {
                     }
                 }
 
-                // Log::VerboseFmt("[ApiClient_Deserialize] header[%d] %s: %s", idx, name.c_str(), value.c_str());
+                if (idx < 40
+                    || name == "launcher_info"
+                    || name == "fan_level"
+                    || name == "chapter_rank_id"
+                    || name == "chapter_total_point"
+                    || name == "user_stamina"
+                    || name == "x-res-version"
+                    || name == "x-server-date") {
+                    Log::InfoFmt("[ApiClient_Deserialize] header[%d] %s: %s", idx, name.c_str(), value.c_str());
+                }
                 ++idx;
             }
 
