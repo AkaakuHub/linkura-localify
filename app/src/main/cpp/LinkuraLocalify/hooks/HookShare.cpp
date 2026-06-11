@@ -872,6 +872,10 @@ namespace LinkuraLocal::HookShare {
                 || url.starts_with("https://link-like-lovelive.app/");
         }
 
+        static bool IsOfficialTopWebUrl(const std::string& url) {
+            return url.starts_with("https://link-like-lovelive.app/");
+        }
+
         static Il2cppUtils::Il2CppString* RewriteWebViewUrlString(Il2cppUtils::Il2CppString* value, const char* source) {
             const auto original = value ? value->ToString() : "(null)";
             AppendOfficialRequestAudit("webview_url_opened", original, {{"source", source}});
@@ -883,9 +887,19 @@ namespace LinkuraLocal::HookShare {
             if (IsOfficialAssetUrl(original)) {
                 if (Config::assetsUrlPrefix.empty()) {
                     AppendOfficialRequestAudit("selfhost_asset_base_url_empty", original, {{"source", source}});
-                    return value;
+                    return Il2cppUtils::Il2CppString::New("about:blank");
                 }
                 const auto rewritten = replaceUriHost(original, Config::assetsUrlPrefix);
+                AppendOfficialRequestAudit("webview_url_rewritten", original, {{"rewritten", rewritten}, {"source", source}});
+                return Il2cppUtils::Il2CppString::New(rewritten);
+            }
+
+            if (IsOfficialTopWebUrl(original)) {
+                if (Config::topUrlPrefix.empty()) {
+                    AppendOfficialRequestAudit("selfhost_top_url_empty", original, {{"source", source}});
+                    return Il2cppUtils::Il2CppString::New("about:blank");
+                }
+                const auto rewritten = JoinBaseUrlAndPath(Config::topUrlPrefix, ExtractUrlPathAndQuery(original));
                 AppendOfficialRequestAudit("webview_url_rewritten", original, {{"rewritten", rewritten}, {"source", source}});
                 return Il2cppUtils::Il2CppString::New(rewritten);
             }
@@ -897,7 +911,7 @@ namespace LinkuraLocal::HookShare {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
             if (selfhostApiBaseUrl.empty()) {
                 AppendOfficialRequestAudit("selfhost_api_base_url_empty", original, {{"source", source}});
-                return value;
+                return Il2cppUtils::Il2CppString::New("about:blank");
             }
 
             const auto pathAndQuery = ExtractUrlPathAndQuery(original);

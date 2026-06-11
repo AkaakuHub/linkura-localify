@@ -70,8 +70,8 @@ interface ConfigListener {
     fun onCustomClientVersionChanged(value: String)
     fun onCustomResVersionChanged(value: String)
     fun onEnableOfflineApiMockChanged(value: Boolean)
-    fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String)
-    fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String)
+    fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String)
+    fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String)
 
     fun onPUseRemoteAssetsChanged(value: Boolean)
     fun onPCleanLocalAssetsChanged(value: Boolean)
@@ -465,15 +465,17 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         sendConfigUpdate(config)
     }
 
-    override fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String) {
+    override fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String) {
         val normalizedApiBaseUrl = apiBaseUrl.trim().trimEnd('/')
         val normalizedAssetBaseUrl = assetBaseUrl.trim().trimEnd('/')
-        if (normalizedApiBaseUrl.isEmpty() || normalizedAssetBaseUrl.isEmpty()) {
+        val normalizedTopBaseUrl = topBaseUrl.trim().trimEnd('/')
+        if (normalizedApiBaseUrl.isEmpty() || normalizedAssetBaseUrl.isEmpty() || normalizedTopBaseUrl.isEmpty()) {
             return
         }
         config.assetsUrlPrefix = normalizedAssetBaseUrl
         config.motionCaptureResourceUrl = normalizedAssetBaseUrl
         config.apiMockBaseUrl = normalizedApiBaseUrl
+        config.topUrlPrefix = normalizedTopBaseUrl
         config.enableOfflineApiMock = true
         config.enableMotionCaptureReplay = true
         config.enableInGameReplayDisplay = true
@@ -485,15 +487,17 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         sendConfigUpdate(config)
     }
 
-    override fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String) {
+    override fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String) {
         val normalizedApiBaseUrl = apiBaseUrl.trim().trimEnd('/')
         val normalizedAssetBaseUrl = assetBaseUrl.trim().trimEnd('/')
-        if (normalizedApiBaseUrl.isEmpty() || normalizedAssetBaseUrl.isEmpty()) {
+        val normalizedTopBaseUrl = topBaseUrl.trim().trimEnd('/')
+        if (normalizedApiBaseUrl.isEmpty() || normalizedAssetBaseUrl.isEmpty() || normalizedTopBaseUrl.isEmpty()) {
             return
         }
         config.assetsUrlPrefix = normalizedAssetBaseUrl
         config.motionCaptureResourceUrl = normalizedAssetBaseUrl
         config.apiMockBaseUrl = normalizedApiBaseUrl
+        config.topUrlPrefix = normalizedTopBaseUrl
         config.enableOfflineApiMock = false
         config.enableMotionCaptureReplay = false
         config.enableInGameReplayDisplay = false

@@ -64,6 +64,7 @@
     <string name="selfhost_base_url">Selfhost Base URL</string>
     <string name="selfhost_api_base_url">Selfhost API Base URL</string>
     <string name="selfhost_asset_base_url">Selfhost Asset Base URL</string>
+    <string name="selfhost_top_base_url">Selfhost Top Web Base URL</string>
     <string name="apply_selfhost_local_mode">Use Selfhost API and Assets</string>
     <string name="apply_selfhost_asset_capture_mode">Use Official API and Selfhost Assets</string>
     <string name="check_selfhost_connection">Check Selfhost Connection</string>

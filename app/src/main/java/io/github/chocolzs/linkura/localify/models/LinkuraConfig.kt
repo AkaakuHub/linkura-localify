@@ -70,6 +70,7 @@ data class LinkuraConfig (
 
     var enableOfflineApiMock: Boolean = false,
     var apiMockBaseUrl: String = "",
+    var topUrlPrefix: String = "",
     var resourceVersionMode: Int = 0,
     var customClientVersion: String = "",
     var customResVersion: String = "",

@@ -113,6 +113,7 @@ message ConfigUpdate {
   optional bool memorize_free_camera_pos = 47;
   optional bool enable_offline_api_mock = 48;
   optional string api_mock_base_url = 51;
+  optional string top_url_prefix = 52;
   reserved 49, 50;
 }
 

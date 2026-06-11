@@ -62,6 +62,7 @@ namespace LinkuraLocal::Config {
 
     bool enableOfflineApiMock = false;
     std::string apiMockBaseUrl;
+    std::string topUrlPrefix;
     
     // Archive configuration mapping: archives_id -> item data
     std::unordered_map<std::string, nlohmann::json> archiveConfigMap;
@@ -134,6 +135,7 @@ namespace LinkuraLocal::Config {
             GetConfigItem(localeCode);
             GetConfigItem(enableOfflineApiMock);
             GetConfigItem(apiMockBaseUrl);
+            GetConfigItem(topUrlPrefix);
             if (localeCode != "ja-JP") {
                 enableLocale = true;
             }
@@ -224,6 +226,7 @@ namespace LinkuraLocal::Config {
                 if (configUpdate.has_story_replace_content()) storyReplaceContent = configUpdate.story_replace_content();
                 if (configUpdate.has_enable_offline_api_mock()) enableOfflineApiMock = configUpdate.enable_offline_api_mock();
                 if (configUpdate.has_api_mock_base_url()) apiMockBaseUrl = configUpdate.api_mock_base_url();
+                if (configUpdate.has_top_url_prefix()) topUrlPrefix = configUpdate.top_url_prefix();
             }
         } catch (const std::exception& e) {
             Log::ErrorFmt("UpdateConfig error: %s", e.what());

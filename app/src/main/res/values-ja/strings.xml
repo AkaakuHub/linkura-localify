@@ -552,6 +552,7 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="selfhost_base_url">セルフホストベースURL</string>
     <string name="selfhost_api_base_url">セルフホストAPIベースURL</string>
     <string name="selfhost_asset_base_url">セルフホストアセットベースURL</string>
+    <string name="selfhost_top_base_url">セルフホストWebベースURL</string>
     <string name="apply_selfhost_local_mode">セルフホストAPIとアセットを使う</string>
     <string name="apply_selfhost_asset_capture_mode">公式APIとセルフホストアセットを使う</string>
     <string name="check_selfhost_connection">セルフホスト疎通確認</string>
