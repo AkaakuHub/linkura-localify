@@ -150,22 +150,20 @@ class LinkuraAidlService : Service() {
         super.onDestroy()
         INSTANCE = null
         isRunning.set(false)
-        
-        // Notify all clients of disconnection
-        val clientCount = callbacks.registeredCallbackCount
-        val callbacksCopy = arrayOfNulls<ILinkuraCallback>(clientCount)
-        for (i in 0 until clientCount) {
-            callbacksCopy[i] = callbacks.getBroadcastItem(i)
-        }
-        
-        callbacksCopy.forEach { callback ->
-            try {
-                callback?.onDisconnected()
-            } catch (e: RemoteException) {
-                Log.v(TAG, "Client already disconnected during service destruction")
+
+        val clientCount = callbacks.beginBroadcast()
+        try {
+            for (i in 0 until clientCount) {
+                try {
+                    callbacks.getBroadcastItem(i)?.onDisconnected()
+                } catch (e: RemoteException) {
+                    Log.v(TAG, "Client already disconnected during service destruction")
+                }
             }
+        } finally {
+            callbacks.finishBroadcast()
         }
-        
+
         callbacks.kill()
         
         val uptime = System.currentTimeMillis() - startTime.get()
