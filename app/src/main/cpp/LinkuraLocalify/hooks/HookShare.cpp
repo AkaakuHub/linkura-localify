@@ -755,6 +755,27 @@ namespace LinkuraLocal::HookShare {
             return "";
         }
 
+        static Il2cppUtils::Il2CppString* RewriteApiBasePathString(Il2cppUtils::Il2CppString* value, const char* source) {
+            if (!Config::enableOfflineApiMock) return value;
+
+            const auto baseUrl = GetSelfhostApiBaseUrl();
+            const auto original = value ? value->ToString() : "(null)";
+            if (baseUrl.empty()) {
+                AppendOfficialRequestAudit("selfhost_api_base_url_empty", original, {{"source", source}});
+                Log::ErrorFmt("[SelfhostAudit] selfhost_api_base_url_empty source=%s original=%s",
+                              source,
+                              original.c_str());
+                return Il2cppUtils::Il2CppString::New("http://127.0.0.1:9");
+            }
+
+            AppendOfficialRequestAudit("api_basepath_rewritten", original, {{"rewritten", baseUrl}, {"source", source}});
+            Log::WarnFmt("[SelfhostAudit] API base path replaced source=%s %s -> %s",
+                         source,
+                         original.c_str(),
+                         baseUrl.c_str());
+            return Il2cppUtils::Il2CppString::New(baseUrl);
+        }
+
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
             Il2cppUtils::Il2CppString* path, void* method,
             void* queryParams, void* postBody,
@@ -1033,23 +1054,29 @@ namespace LinkuraLocal::HookShare {
         Configuration_set_UserAgent_Orig(self, value ,mtd);
     }
 
+    DEFINE_HOOK(void, ApiClient_ctor_string, (void* self, Il2cppUtils::Il2CppString* basePath, void* mtd)) {
+        ApiClient_ctor_string_Orig(self, RewriteApiBasePathString(basePath, "ApiClient.ctor(string)"), mtd);
+    }
+
+    DEFINE_HOOK(void, Configuration_ctor_dictionaries, (void* self, void* defaultHeader, void* apiKey, void* apiKeyPrefix, Il2cppUtils::Il2CppString* basePath, void* mtd)) {
+        Configuration_ctor_dictionaries_Orig(self,
+                                             defaultHeader,
+                                             apiKey,
+                                             apiKeyPrefix,
+                                             RewriteApiBasePathString(basePath, "Configuration.ctor(..., string)"),
+                                             mtd);
+    }
+
     DEFINE_HOOK(Il2cppUtils::Il2CppString*, Configuration_get_BasePath, (void* self, void* mtd)) {
         auto result = Configuration_get_BasePath_Orig(self, mtd);
         if (Config::enableOfflineApiMock) {
-            const auto baseUrl = GetSelfhostApiBaseUrl();
-            if (!baseUrl.empty()) {
-                AppendOfficialRequestAudit("api_basepath_rewritten",
-                                           result ? result->ToString() : "(null)",
-                                           {{"rewritten", baseUrl}});
-                Log::WarnFmt("[SelfhostAudit] Configuration_get_BasePath replaced %s -> %s",
-                             result ? result->ToString().c_str() : "(null)",
-                             baseUrl.c_str());
-                return Il2cppUtils::Il2CppString::New(baseUrl);
-            }
-            AppendOfficialRequestAudit("selfhost_api_base_url_empty", result ? result->ToString() : "(null)", {});
-            return Il2cppUtils::Il2CppString::New("http://127.0.0.1:9");
+            return RewriteApiBasePathString(result, "Configuration.get_BasePath");
         }
         return result;
+    }
+
+    DEFINE_HOOK(void, Configuration_set_BasePath, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
+        Configuration_set_BasePath_Orig(self, RewriteApiBasePathString(value, "Configuration.set_BasePath"), mtd);
     }
 
 //    DEFINE_HOOK(void, AssetManager_SynchronizeResourceVersion_MoveNext, (void* self, void* mtd)) {
@@ -1242,7 +1269,11 @@ namespace LinkuraLocal::HookShare {
 #pragma region oldVersion
         ADD_HOOK(Configuration_AddDefaultHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "AddDefaultHeader"));
         ADD_HOOK(Configuration_set_UserAgent, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_UserAgent"));
+        ADD_HOOK(ApiClient_ctor_string, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", ".ctor", {"System.String"}));
+        method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", ".ctor", 4);
+        ADD_HOOK(Configuration_ctor_dictionaries, method ? method->methodPointer : 0);
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
+        ADD_HOOK(Configuration_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_BasePath"));
 //        ADD_HOOK(AssetManager_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "Hailstorm", "AssetManager", "SynchronizeResourceVersion"));
         ADD_HOOK(Core_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "", "Core", "SynchronizeResourceVersion"));
         ADD_HOOK(Application_get_version, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Application::get_version"));
