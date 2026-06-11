@@ -1,7 +1,6 @@
 #include "../HookMain.h"
 #include "../Misc.hpp"
 #include "../Local.h"
-#include "http-mock/HttpMock.hpp"
 #include <re2/re2.h>
 #include <fstream>
 #include <filesystem>
@@ -11,16 +10,6 @@
 
 namespace LinkuraLocal::HookShare {
     namespace {
-        struct NullableInt {
-            bool hasValue;
-            int32_t value;
-        };
-
-        struct NullableLong {
-            bool hasValue;
-            int64_t value;
-        };
-
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
@@ -800,11 +789,9 @@ namespace LinkuraLocal::HookShare {
             AppendOfficialRequestAudit("selfhost_api_request", strPath, selfhostAudit);
             Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
                          strPath.c_str(), selfhostApiBaseUrl.c_str());
-            auto task = LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, strPath, strBody);
-            if (task) return task;
-            AppendOfficialRequestAudit("selfhost_api_request_failed", strPath, selfhostAudit);
-            Log::ErrorFmt("[SelfhostAudit] selfhost_api_request_failed path=%s", strPath.c_str());
-            return nullptr;
+            return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
+                                              headerParams, formParams, fileParams, pathParams,
+                                              contentType, cancellationToken, method_info);
         }
 
         AppendOfficialRequestAudit("official_api_request_allowed", strPath, requestAudit);
@@ -955,51 +942,6 @@ namespace LinkuraLocal::HookShare {
         return ArchiveApi_ArchiveGetArchiveListWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
     }
 
-    DEFINE_HOOK(void*, ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current, (void* self,
-            Il2cppUtils::Il2CppString* liveId,
-            NullableInt playTimeSecond,
-            NullableLong timelineUnixtime,
-            void* cancellation_token,
-            void* method_info)) {
-        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
-        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
-            nlohmann::json request = {
-                {"live_id", liveId ? liveId->ToString() : ""},
-            };
-            if (playTimeSecond.hasValue) {
-                request["play_time_second"] = playTimeSecond.value;
-            }
-            if (timelineUnixtime.hasValue) {
-                request["timeline_unixtime"] = timelineUnixtime.value;
-            }
-            const auto requestJson = request.dump();
-            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
-                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
-        }
-        return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current_Orig(self,
-                                                                            liveId,
-                                                                            playTimeSecond,
-                                                                            timelineUnixtime,
-                                                                            cancellation_token,
-                                                                            method_info);
-    }
-
-    DEFINE_HOOK(void*, ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
-        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
-            const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
-            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
-                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
-        }
-        return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy_Orig(self,
-                                                                           request,
-                                                                           cancellation_token,
-                                                                           method_info);
-    }
     // cheat for server api, but we need to decrease the abnormal behaviour here. ( camera_type should change when every request sends )
     DEFINE_HOOK(void* ,ArchiveApi_ArchiveSetFesCameraWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         if (Config::fesArchiveUnlockTicket) {
@@ -1029,29 +971,6 @@ namespace LinkuraLocal::HookShare {
         return FesliveApi_FesliveSetCameraWithHttpInfoAsync_Orig(self,
                                                                     request,
                                                                     cancellation_token, method_info);
-    }
-
-    DEFINE_HOOK(void*, ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
-        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
-            const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
-            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
-                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
-        }
-        return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
-    }
-    DEFINE_HOOK(void*, ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
-        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
-        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
-            const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
-            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/get_fes_timeline_data", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
-            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/get_fes_timeline_data request=%s base=%s",
-                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
-            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/get_fes_timeline_data", requestJson);
-        }
-        return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
     }
 
     DEFINE_HOOK(void* , FesliveApi_FesliveEnterWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
@@ -1239,13 +1158,6 @@ namespace LinkuraLocal::HookShare {
                 ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_MoveNext_Addr = method->methodPointer;
             }
         }
-        if (VersionCompatibility::VersionChecker(">= 5.0.0").checkCompatibility(Config::currentClientVersion)) {
-            method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveWithliveInfoWithHttpInfoAsync", 4);
-            ADD_HOOK(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current, method ? method->methodPointer : 0);
-        } else {
-            method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveWithliveInfoWithHttpInfoAsync", 2);
-            ADD_HOOK(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy, method ? method->methodPointer : 0);
-        }
         // Fes live camera unlock
         ADD_HOOK(ArchiveApi_ArchiveSetFesCameraWithHttpInfoAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveSetFesCameraWithHttpInfoAsync"));
 #pragma endregion
@@ -1334,8 +1246,6 @@ namespace LinkuraLocal::HookShare {
 //        ADD_HOOK(AssetManager_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "Hailstorm", "AssetManager", "SynchronizeResourceVersion"));
         ADD_HOOK(Core_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "", "Core", "SynchronizeResourceVersion"));
         ADD_HOOK(Application_get_version, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Application::get_version"));
-        ADD_HOOK(ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveGetWithTimelineDataWithHttpInfoAsync"));
-        ADD_HOOK(ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveGetFesTimelineDataWithHttpInfoAsync"));
         //        auto AssetManager_klass = Il2cppUtils::GetClassIl2cpp("Core.dll", "Hailstorm", "AssetManager");
 //        if (AssetManager_klass) {
 //            auto SynchronizeResourceVersion_klss = Il2cppUtils::find_nested_class_from_name(AssetManager_klass, "<SynchronizeResourceVersion>d__22");
