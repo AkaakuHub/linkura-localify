@@ -1396,12 +1396,19 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
         ADD_HOOK(Configuration_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_BasePath"));
         auto CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "", "CommonApiCache");
-        if (CommonApiCache_klass) {
-            ADD_HOOK(CommonApiCache_UpdateFromCommonHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "UpdateFromCommonHeader"));
-            ADD_HOOK(CommonApiCache_set__LauncherInfo, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "set__LauncherInfo"));
-            ADD_HOOK(CommonApiCache_GetLauncherInfoStatus, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "GetLauncherInfoStatus"));
-        } else {
+        if (!CommonApiCache_klass) {
             Log::WarnFmt("[CommonApiCache] class not found");
+        } else {
+            auto updateFromCommonHeader = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "UpdateFromCommonHeader", 1);
+            auto setLauncherInfo = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "set__LauncherInfo", 1);
+            auto getLauncherInfoStatus = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "GetLauncherInfoStatus", 1);
+            ADD_HOOK(CommonApiCache_UpdateFromCommonHeader, updateFromCommonHeader ? updateFromCommonHeader->methodPointer : 0);
+            ADD_HOOK(CommonApiCache_set__LauncherInfo, setLauncherInfo ? setLauncherInfo->methodPointer : 0);
+            ADD_HOOK(CommonApiCache_GetLauncherInfoStatus, getLauncherInfoStatus ? getLauncherInfoStatus->methodPointer : 0);
+            Log::InfoFmt("[CommonApiCache] hooks update=%p setLauncherInfo=%p getStatus=%p",
+                         updateFromCommonHeader ? reinterpret_cast<void*>(updateFromCommonHeader->methodPointer) : nullptr,
+                         setLauncherInfo ? reinterpret_cast<void*>(setLauncherInfo->methodPointer) : nullptr,
+                         getLauncherInfoStatus ? reinterpret_cast<void*>(getLauncherInfoStatus->methodPointer) : nullptr);
         }
 //        ADD_HOOK(AssetManager_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "Hailstorm", "AssetManager", "SynchronizeResourceVersion"));
         ADD_HOOK(Core_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "", "Core", "SynchronizeResourceVersion"));
