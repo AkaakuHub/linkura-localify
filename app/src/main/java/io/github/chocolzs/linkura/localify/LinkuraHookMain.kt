@@ -1252,9 +1252,10 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                     "date",
                 )
                 connection.headerFields.forEach { (name, values) ->
-                    if (name != null && allowedHeaders.contains(name.lowercase())) {
+                    val normalizedName = name?.lowercase()
+                    if (normalizedName != null && allowedHeaders.contains(normalizedName)) {
                         values.orEmpty().forEach { value ->
-                            headers.put(JSONObject().put("name", name).put("value", value))
+                            headers.put(JSONObject().put("name", normalizedName).put("value", value))
                         }
                     }
                 }
