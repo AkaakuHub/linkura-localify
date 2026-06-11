@@ -11,6 +11,16 @@
 
 namespace LinkuraLocal::HookShare {
     namespace {
+        struct NullableInt {
+            bool hasValue;
+            int32_t value;
+        };
+
+        struct NullableLong {
+            bool hasValue;
+            int64_t value;
+        };
+
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
@@ -945,7 +955,38 @@ namespace LinkuraLocal::HookShare {
         return ArchiveApi_ArchiveGetArchiveListWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
     }
 
-    DEFINE_HOOK(void* , ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
+    DEFINE_HOOK(void*, ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current, (void* self,
+            Il2cppUtils::Il2CppString* liveId,
+            NullableInt playTimeSecond,
+            NullableLong timelineUnixtime,
+            void* cancellation_token,
+            void* method_info)) {
+        const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+        if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
+            nlohmann::json request = {
+                {"live_id", liveId ? liveId->ToString() : ""},
+            };
+            if (playTimeSecond.hasValue) {
+                request["play_time_second"] = playTimeSecond.value;
+            }
+            if (timelineUnixtime.hasValue) {
+                request["timeline_unixtime"] = timelineUnixtime.value;
+            }
+            const auto requestJson = request.dump();
+            AppendOfficialRequestAudit("selfhost_api_request", "/v1/archive/withlive_info", {{"request", requestJson}, {"base_url", selfhostApiBaseUrl}});
+            Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=/v1/archive/withlive_info request=%s base=%s",
+                         requestJson.c_str(), selfhostApiBaseUrl.c_str());
+            return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
+        }
+        return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current_Orig(self,
+                                                                            liveId,
+                                                                            playTimeSecond,
+                                                                            timelineUnixtime,
+                                                                            cancellation_token,
+                                                                            method_info);
+    }
+
+    DEFINE_HOOK(void*, ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
         if (Config::enableOfflineApiMock && !selfhostApiBaseUrl.empty()) {
             const auto requestJson = Il2cppUtils::ToJsonStr(request)->ToString();
@@ -954,9 +995,10 @@ namespace LinkuraLocal::HookShare {
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
         }
-        return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Orig(self,
-                                                                          request,
-                                                                          cancellation_token, method_info);
+        return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy_Orig(self,
+                                                                           request,
+                                                                           cancellation_token,
+                                                                           method_info);
     }
     // cheat for server api, but we need to decrease the abnormal behaviour here. ( camera_type should change when every request sends )
     DEFINE_HOOK(void* ,ArchiveApi_ArchiveSetFesCameraWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
@@ -1188,14 +1230,22 @@ namespace LinkuraLocal::HookShare {
             if (method) {
                 ArchiveApi_ArchiveGetArchiveList_Old_MoveNext_Addr = method->methodPointer;
             }
-            // hook /v1/archive/withlive_info
-            auto ArchiveWithliveInfoWithHttpInfoAsync_klass = Il2cppUtils::find_nested_class_from_name(ArchiveApi_klass, "<ArchiveWithliveInfoWithHttpInfoAsync>d__70");
+            const bool usesSeparatedWithliveInfoArgs = VersionCompatibility::VersionChecker(">= 5.0.0").checkCompatibility(Config::currentClientVersion);
+            auto ArchiveWithliveInfoWithHttpInfoAsync_klass = Il2cppUtils::find_nested_class_from_name(
+                    ArchiveApi_klass,
+                    usesSeparatedWithliveInfoArgs ? "<ArchiveWithliveInfoWithHttpInfoAsync>d__82" : "<ArchiveWithliveInfoWithHttpInfoAsync>d__70");
             method = Il2cppUtils::GetMethodIl2cpp(ArchiveWithliveInfoWithHttpInfoAsync_klass, "MoveNext", 0);
             if (method) {
                 ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_MoveNext_Addr = method->methodPointer;
             }
         }
-        ADD_HOOK(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveWithliveInfoWithHttpInfoAsync"));
+        if (VersionCompatibility::VersionChecker(">= 5.0.0").checkCompatibility(Config::currentClientVersion)) {
+            method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveWithliveInfoWithHttpInfoAsync", 4);
+            ADD_HOOK(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Current, method ? method->methodPointer : 0);
+        } else {
+            method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveWithliveInfoWithHttpInfoAsync", 2);
+            ADD_HOOK(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Legacy, method ? method->methodPointer : 0);
+        }
         // Fes live camera unlock
         ADD_HOOK(ArchiveApi_ArchiveSetFesCameraWithHttpInfoAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi", "ArchiveSetFesCameraWithHttpInfoAsync"));
 #pragma endregion
