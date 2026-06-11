@@ -153,10 +153,16 @@ namespace LinkuraLocal::HookShare {
             // Log::VerboseFmt("[ApiClient_Deserialize] response headers dump end response=%p count=%d", response, idx);
         }
 
-        void RememberOfficialApiRequest(const std::string& path, const std::string& request) {
+        std::string SerializeForAudit(void* object) {
+            if (!object) return "";
+            auto json = Il2cppUtils::ToJsonStr(object);
+            return json ? json->ToString() : "";
+        }
+
+        void RememberOfficialApiRequest(const std::string& path, const nlohmann::json& request) {
             std::lock_guard<std::mutex> lock(apiAuditContextMutex);
             lastOfficialApiPath = path;
-            lastOfficialApiRequest = request;
+            lastOfficialApiRequest = request.dump();
         }
 
         nlohmann::json CurrentOfficialApiRequestContext() {
@@ -773,27 +779,38 @@ namespace LinkuraLocal::HookShare {
                 strBody = bodyStr->ToString();
             }
         }
-        Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
+        nlohmann::json requestAudit = {
+            {"request", strBody},
+            {"method", SerializeForAudit(method)},
+            {"query_params", SerializeForAudit(queryParams)},
+            {"form_params", SerializeForAudit(formParams)},
+            {"path_params", SerializeForAudit(pathParams)},
+            {"content_type", contentType ? contentType->ToString() : ""},
+        };
+        Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s\nquery: %s",
+                        strPath.c_str(), strBody.c_str(), requestAudit["query_params"].get<std::string>().c_str());
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
             if (selfhostApiBaseUrl.empty()) {
-                AppendOfficialRequestAudit("selfhost_api_base_url_empty", strPath, {{"request", strBody}});
+                AppendOfficialRequestAudit("selfhost_api_base_url_empty", strPath, requestAudit);
                 Log::ErrorFmt("[SelfhostAudit] selfhost_api_base_url_empty path=%s", strPath.c_str());
                 return nullptr;
             }
-            AppendOfficialRequestAudit("selfhost_api_request", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
+            auto selfhostAudit = requestAudit;
+            selfhostAudit["base_url"] = selfhostApiBaseUrl;
+            AppendOfficialRequestAudit("selfhost_api_request", strPath, selfhostAudit);
             Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
                          strPath.c_str(), selfhostApiBaseUrl.c_str());
             auto task = LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, strPath, strBody);
             if (task) return task;
-            AppendOfficialRequestAudit("selfhost_api_request_failed", strPath, {{"request", strBody}, {"base_url", selfhostApiBaseUrl}});
+            AppendOfficialRequestAudit("selfhost_api_request_failed", strPath, selfhostAudit);
             Log::ErrorFmt("[SelfhostAudit] selfhost_api_request_failed path=%s", strPath.c_str());
             return nullptr;
         }
 
-        AppendOfficialRequestAudit("official_api_request_allowed", strPath, {{"request", strBody}});
-        RememberOfficialApiRequest(strPath, strBody);
+        AppendOfficialRequestAudit("official_api_request_allowed", strPath, requestAudit);
+        RememberOfficialApiRequest(strPath, requestAudit);
         Log::ErrorFmt("[SelfhostAudit] official_api_request_allowed path=%s request=%s",
                       strPath.c_str(), strBody.c_str());
 
