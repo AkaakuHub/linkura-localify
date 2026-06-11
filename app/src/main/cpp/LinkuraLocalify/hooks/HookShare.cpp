@@ -14,17 +14,112 @@ namespace LinkuraLocal::HookShare {
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
 
-        static void DumpRestResponseHeadersIfPossible(void* response) {
-            if (!response) return;
+        static bool IsRestSharpResponse(void* response) {
+            if (!response) return false;
 
             const auto klass = Il2cppUtils::get_class_from_instance(response);
-            if (!klass || !klass->namespaze || !klass->name) return;
-            // Safety gate: only attempt for RestSharp response types.
-            if (std::string_view(klass->namespaze) != "RestSharp") return;
-            if (std::string_view(klass->name).find("RestResponse") == std::string_view::npos
-                && std::string_view(klass->name).find("Response") == std::string_view::npos) {
-                return;
+            if (!klass || !klass->namespaze || !klass->name) return false;
+            if (std::string_view(klass->namespaze) != "RestSharp") return false;
+            return std::string_view(klass->name).find("RestResponse") != std::string_view::npos
+                || std::string_view(klass->name).find("Response") != std::string_view::npos;
+        }
+
+        static Il2cppUtils::MethodInfo* ResolveRestResponseGetHeaders() {
+            static Il2cppUtils::MethodInfo* s_getHeadersMi = nullptr;
+            static bool s_resolved = false;
+            if (s_resolved) return s_getHeadersMi;
+            s_resolved = true;
+
+            s_getHeadersMi = Il2cppUtils::GetMethodIl2cpp("RestSharp.dll", "RestSharp", "RestResponseBase", "get_Headers", 0);
+            if (!s_getHeadersMi) {
+                s_getHeadersMi = Il2cppUtils::GetMethodIl2cpp("RestSharp", "RestSharp", "RestResponseBase", "get_Headers", 0);
             }
+            return s_getHeadersMi;
+        }
+
+        static std::string LowercaseAscii(std::string value) {
+            for (auto& ch : value) {
+                if (ch >= 'A' && ch <= 'Z') {
+                    ch = static_cast<char>(ch - 'A' + 'a');
+                }
+            }
+            return value;
+        }
+
+        static bool HasUppercaseAscii(std::string_view value) {
+            for (const auto ch : value) {
+                if (ch >= 'A' && ch <= 'Z') return true;
+            }
+            return false;
+        }
+
+        static void NormalizeRestResponseHeaderNamesIfPossible(void* response) {
+            if (!IsRestSharpResponse(response)) return;
+
+            auto getHeadersMi = ResolveRestResponseGetHeaders();
+            if (!getHeadersMi) return;
+
+            UnityResolve::ThreadAttach();
+
+            using GetHeadersFn = void*(*)(void*, Il2cppUtils::MethodInfo*);
+            auto headersObj = reinterpret_cast<GetHeadersFn>(getHeadersMi->methodPointer)(response, getHeadersMi);
+            if (!headersObj) return;
+
+            auto hdrKlass = Il2cppUtils::get_class_from_instance(headersObj);
+            const bool isGenericList = hdrKlass
+                                    && hdrKlass->namespaze
+                                    && hdrKlass->name
+                                    && std::string_view(hdrKlass->namespaze) == "System.Collections.Generic"
+                                    && std::string_view(hdrKlass->name).find("List`1") != std::string_view::npos;
+            if (!isGenericList) return;
+
+            auto list = reinterpret_cast<UnityResolve::UnityType::List<void*>*>(headersObj);
+            if (!list || !list->pList) return;
+
+            static void* s_paramKlass = nullptr;
+            static Il2cppUtils::MethodInfo* s_paramGetNameMi = nullptr;
+            static Il2cppUtils::MethodInfo* s_paramSetNameMi = nullptr;
+            static bool s_paramResolved = false;
+            if (!s_paramResolved) {
+                s_paramResolved = true;
+                s_paramKlass = Il2cppUtils::GetClassIl2cpp("RestSharp.dll", "RestSharp", "Parameter");
+                if (!s_paramKlass) s_paramKlass = Il2cppUtils::GetClassIl2cpp("RestSharp", "RestSharp", "Parameter");
+                if (s_paramKlass) {
+                    s_paramGetNameMi = Il2cppUtils::GetMethodIl2cpp(s_paramKlass, "get_Name", 0);
+                    s_paramSetNameMi = Il2cppUtils::GetMethodIl2cpp(s_paramKlass, "set_Name", 1);
+                }
+            }
+            if (!s_paramGetNameMi || !s_paramSetNameMi) return;
+
+            auto items = list->pList;
+            const int cap = static_cast<int>(items->max_length);
+            const int n = (list->size < cap) ? list->size : cap;
+            int changed = 0;
+            for (int i = 0; i < n; ++i) {
+                auto param = items->At(static_cast<unsigned>(i));
+                if (!param) continue;
+
+                using GetNameFn = Il2cppUtils::Il2CppString*(*)(void*, Il2cppUtils::MethodInfo*);
+                auto nameStr = reinterpret_cast<GetNameFn>(s_paramGetNameMi->methodPointer)(param, s_paramGetNameMi);
+                if (!nameStr) continue;
+
+                auto name = nameStr->ToString();
+                if (!HasUppercaseAscii(name)) continue;
+
+                auto lowered = Il2cppUtils::Il2CppString::New(LowercaseAscii(std::move(name)));
+                using SetNameFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+                reinterpret_cast<SetNameFn>(s_paramSetNameMi->methodPointer)(param, lowered, s_paramSetNameMi);
+                ++changed;
+            }
+
+            if (changed > 0 && (Config::dbgMode || Config::enableOfflineApiMock)) {
+                Log::InfoFmt("[ApiClient_Deserialize] normalized response header names changed=%d", changed);
+            }
+        }
+
+        static void DumpRestResponseHeadersIfPossible(void* response) {
+            if (!IsRestSharpResponse(response)) return;
+            const auto klass = Il2cppUtils::get_class_from_instance(response);
 
             static std::mutex s_mtx;
             static std::unordered_set<void*> s_dumped;
@@ -35,14 +130,7 @@ namespace LinkuraLocal::HookShare {
                 if (s_dumped.size() > 256) s_dumped.clear();
             }
 
-            // Resolve RestResponseBase.get_Headers via MethodInfo (so we can pass MethodInfo*).
-            static Il2cppUtils::MethodInfo* s_getHeadersMi = nullptr;
-            if (!s_getHeadersMi) {
-                s_getHeadersMi = Il2cppUtils::GetMethodIl2cpp("RestSharp.dll", "RestSharp", "RestResponseBase", "get_Headers", 0);
-                if (!s_getHeadersMi) {
-                    s_getHeadersMi = Il2cppUtils::GetMethodIl2cpp("RestSharp", "RestSharp", "RestResponseBase", "get_Headers", 0);
-                }
-            }
+            auto s_getHeadersMi = ResolveRestResponseGetHeaders();
             if (!s_getHeadersMi) return;
 
             // This hook may run on non-Unity threads.
@@ -826,6 +914,9 @@ namespace LinkuraLocal::HookShare {
     }
     // http response modify
     DEFINE_HOOK(void* , ApiClient_Deserialize, (void* self, void* response, void* type, void* method_info)) {
+        if (Config::enableOfflineApiMock) {
+            NormalizeRestResponseHeaderNamesIfPossible(response);
+        }
         if (Config::dbgMode || Config::enableOfflineApiMock) {
             auto caller = __builtin_return_address(0);
             Log::VerboseFmt("[ApiClient_Deserialize] enter self=%p response=%p type=%p caller=%p", self, response, type, caller);
