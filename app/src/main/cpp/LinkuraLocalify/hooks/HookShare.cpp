@@ -1170,6 +1170,36 @@ namespace LinkuraLocal::HookShare {
         Configuration_set_BasePath_Orig(self, RewriteApiBasePathString(value, "Configuration.set_BasePath"), mtd);
     }
 
+    DEFINE_HOOK(void, CommonApiCache_UpdateFromCommonHeader, (void* self, void* header, void* mtd)) {
+        if (Config::dbgMode || Config::enableOfflineApiMock) {
+            auto klass = header ? Il2cppUtils::get_class_from_instance(header) : nullptr;
+            Log::InfoFmt("[CommonApiCache] UpdateFromCommonHeader self=%p header=%p type=%s.%s",
+                         self,
+                         header,
+                         klass && klass->namespaze ? klass->namespaze : "",
+                         klass && klass->name ? klass->name : "");
+        }
+        CommonApiCache_UpdateFromCommonHeader_Orig(self, header, mtd);
+    }
+
+    DEFINE_HOOK(void, CommonApiCache_set__LauncherInfo, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
+        if (Config::dbgMode || Config::enableOfflineApiMock) {
+            Log::InfoFmt("[CommonApiCache] set__LauncherInfo value=%s",
+                         value ? value->ToString().c_str() : "(null)");
+        }
+        CommonApiCache_set__LauncherInfo_Orig(self, value, mtd);
+    }
+
+    DEFINE_HOOK(int32_t, CommonApiCache_GetLauncherInfoStatus, (void* self, Il2cppUtils::Il2CppString* key, void* mtd)) {
+        auto result = CommonApiCache_GetLauncherInfoStatus_Orig(self, key, mtd);
+        if (Config::dbgMode || Config::enableOfflineApiMock) {
+            Log::InfoFmt("[CommonApiCache] GetLauncherInfoStatus key=%s result=%d",
+                         key ? key->ToString().c_str() : "(null)",
+                         result);
+        }
+        return result;
+    }
+
 //    DEFINE_HOOK(void, AssetManager_SynchronizeResourceVersion_MoveNext, (void* self, void* mtd)) {
 ////        Log::DebugFmt("AssetManager_SynchronizeResourceVersion HOOKED, requestedVersion is %s", requestedVersion->ToString().c_str());
 //        static auto AssetManager_klass = Il2cppUtils::GetClassIl2cpp("Core.dll", "Hailstorm", "AssetManager");
@@ -1365,6 +1395,14 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(Configuration_ctor_dictionaries, method ? method->methodPointer : 0);
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
         ADD_HOOK(Configuration_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_BasePath"));
+        auto CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "", "CommonApiCache");
+        if (CommonApiCache_klass) {
+            ADD_HOOK(CommonApiCache_UpdateFromCommonHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "UpdateFromCommonHeader"));
+            ADD_HOOK(CommonApiCache_set__LauncherInfo, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "set__LauncherInfo"));
+            ADD_HOOK(CommonApiCache_GetLauncherInfoStatus, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "CommonApiCache", "GetLauncherInfoStatus"));
+        } else {
+            Log::WarnFmt("[CommonApiCache] class not found");
+        }
 //        ADD_HOOK(AssetManager_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "Hailstorm", "AssetManager", "SynchronizeResourceVersion"));
         ADD_HOOK(Core_SynchronizeResourceVersion, Il2cppUtils::GetMethodPointer("Core.dll", "", "Core", "SynchronizeResourceVersion"));
         ADD_HOOK(Application_get_version, Il2cppUtils::il2cpp_resolve_icall("UnityEngine.Application::get_version"));
