@@ -61,7 +61,7 @@ class ConfigUpdateManager private constructor() {
                 if (config.renderTextureLongSide != null) renderTextureLongSide = config.renderTextureLongSide
                 if (config.renderTextureShortSide != null) renderTextureShortSide = config.renderTextureShortSide
                 if (config.hideCharacterBody != null) hideCharacterBody = config.hideCharacterBody
-//                if (config.motionCaptureResourceUrl != null) motionCaptureResourceUrl = config.motionCaptureResourceUrl
+                if (config.motionCaptureResourceUrl != null) motionCaptureResourceUrl = config.motionCaptureResourceUrl
                 if (config.renderTextureAntiAliasing != null) renderTextureAntiAliasing = config.renderTextureAntiAliasing
                 if (config.unlockAfter != null) unlockAfter = config.unlockAfter
                 if (config.filterMotionCaptureReplay != null) filterMotionCaptureReplay = config.filterMotionCaptureReplay

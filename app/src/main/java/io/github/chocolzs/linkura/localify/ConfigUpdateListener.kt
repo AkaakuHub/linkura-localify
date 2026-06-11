@@ -476,7 +476,11 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.apiMockBaseUrl = normalizedApiBaseUrl
         config.enableOfflineApiMock = true
         config.enableMotionCaptureReplay = true
+        config.enableInGameReplayDisplay = true
         config.unlockAfter = true
+        config.filterMotionCaptureReplay = false
+        config.filterPlayableMotionCapture = false
+        config.avoidAccidentalTouch = false
         saveConfig()
         sendConfigUpdate(config)
     }
@@ -491,8 +495,12 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.motionCaptureResourceUrl = normalizedAssetBaseUrl
         config.apiMockBaseUrl = normalizedApiBaseUrl
         config.enableOfflineApiMock = false
-        config.enableMotionCaptureReplay = true
-        config.unlockAfter = true
+        config.enableMotionCaptureReplay = false
+        config.enableInGameReplayDisplay = false
+        config.unlockAfter = false
+        config.filterMotionCaptureReplay = false
+        config.filterPlayableMotionCapture = false
+        config.avoidAccidentalTouch = false
         saveConfig()
         sendConfigUpdate(config)
     }

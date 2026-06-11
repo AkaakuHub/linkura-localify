@@ -949,9 +949,6 @@ namespace LinkuraLocal::HookShare {
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
         }
-        if (!Config::enableOfflineApiMock && (Config::unlockAfter || (Config::enableMotionCaptureReplay && Config::filterMotionCaptureReplay))) {
-            return nullptr;
-        }
         return ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_Orig(self,
                                                                           request,
                                                                           cancellation_token, method_info);
@@ -996,7 +993,7 @@ namespace LinkuraLocal::HookShare {
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/withlive_info", requestJson);
         }
-        return nullptr;
+        return ArchiveApi_ArchiveGetWithTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
     }
     DEFINE_HOOK(void*, ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
         const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -1007,7 +1004,7 @@ namespace LinkuraLocal::HookShare {
                          requestJson.c_str(), selfhostApiBaseUrl.c_str());
             return LinkuraLocal::HttpMock::CreateSelfhostApiTask(selfhostApiBaseUrl, "/v1/archive/get_fes_timeline_data", requestJson);
         }
-        return nullptr;
+        return ArchiveApi_ArchiveGetFesTimelineDataWithHttpInfoAsync_Orig(self, request, cancellation_token, method_info);
     }
 
     DEFINE_HOOK(void* , FesliveApi_FesliveEnterWithHttpInfoAsync, (void* self, Il2cppUtils::Il2CppObject* request, void* cancellation_token, void* method_info)) {
