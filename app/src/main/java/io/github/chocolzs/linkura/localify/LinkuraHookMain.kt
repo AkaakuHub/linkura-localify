@@ -1218,8 +1218,41 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                     throw IllegalStateException("selfhost API failed: $statusCode $body")
                 }
                 val headers = JSONArray()
+                val allowedHeaders = setOf(
+                    "achieved_mission_notification_list",
+                    "chapter_rank_id",
+                    "chapter_total_point",
+                    "content-type",
+                    "exists_circle_approval_pending_from_user",
+                    "fan_level",
+                    "is_already_read_friend_request",
+                    "is_already_read_item_store_new_arrival",
+                    "is_already_read_membership_new_arrival",
+                    "is_already_read_petal_exchange_new_arrival",
+                    "is_already_read_shop_new_arrival",
+                    "is_already_read_sisca_shop_new_arrival",
+                    "is_circle_approve_user",
+                    "is_circle_dissolution_user",
+                    "is_circle_invite_user",
+                    "is_grand_prix_open",
+                    "is_party_gacha_underway",
+                    "jewel_free",
+                    "jewel_paid_apple",
+                    "jewel_paid_google",
+                    "latest_chat_order_id",
+                    "launcher_info",
+                    "name",
+                    "new_gacha_unreadable_type",
+                    "presentbox_count",
+                    "server",
+                    "transfer-encoding",
+                    "user_stamina",
+                    "x-res-version",
+                    "x-server-date",
+                    "date",
+                )
                 connection.headerFields.forEach { (name, values) ->
-                    if (name != null) {
+                    if (name != null && allowedHeaders.contains(name.lowercase())) {
                         values.orEmpty().forEach { value ->
                             headers.put(JSONObject().put("name", name).put("value", value))
                         }
