@@ -843,6 +843,73 @@ namespace LinkuraLocal::HookShare {
             return "";
         }
 
+        static std::string ExtractUrlPathAndQuery(const std::string& url) {
+            const auto schemePos = url.find("://");
+            if (schemePos == std::string::npos) {
+                return url.starts_with("/") ? url : "";
+            }
+            const auto pathPos = url.find('/', schemePos + 3);
+            if (pathPos == std::string::npos) {
+                return "/";
+            }
+            return url.substr(pathPos);
+        }
+
+        static std::string JoinBaseUrlAndPath(const std::string& baseUrl, const std::string& pathAndQuery) {
+            if (baseUrl.empty()) return pathAndQuery;
+            if (pathAndQuery.empty()) return baseUrl;
+            if (baseUrl.back() == '/' && pathAndQuery.front() == '/') {
+                return baseUrl + pathAndQuery.substr(1);
+            }
+            if (baseUrl.back() != '/' && pathAndQuery.front() != '/') {
+                return baseUrl + "/" + pathAndQuery;
+            }
+            return baseUrl + pathAndQuery;
+        }
+
+        static bool IsOfficialApiOrWebUrl(const std::string& url) {
+            return url.starts_with("https://api.link-like-lovelive.app/")
+                || url.starts_with("https://link-like-lovelive.app/");
+        }
+
+        static Il2cppUtils::Il2CppString* RewriteWebViewUrlString(Il2cppUtils::Il2CppString* value, const char* source) {
+            const auto original = value ? value->ToString() : "(null)";
+            AppendOfficialRequestAudit("webview_url_opened", original, {{"source", source}});
+
+            if (!Config::enableOfflineApiMock || !value) {
+                return value;
+            }
+
+            if (IsOfficialAssetUrl(original)) {
+                if (Config::assetsUrlPrefix.empty()) {
+                    AppendOfficialRequestAudit("selfhost_asset_base_url_empty", original, {{"source", source}});
+                    return value;
+                }
+                const auto rewritten = replaceUriHost(original, Config::assetsUrlPrefix);
+                AppendOfficialRequestAudit("webview_url_rewritten", original, {{"rewritten", rewritten}, {"source", source}});
+                return Il2cppUtils::Il2CppString::New(rewritten);
+            }
+
+            if (!IsOfficialApiOrWebUrl(original) && !original.starts_with("/")) {
+                return value;
+            }
+
+            const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
+            if (selfhostApiBaseUrl.empty()) {
+                AppendOfficialRequestAudit("selfhost_api_base_url_empty", original, {{"source", source}});
+                return value;
+            }
+
+            const auto pathAndQuery = ExtractUrlPathAndQuery(original);
+            if (pathAndQuery.empty()) {
+                return value;
+            }
+
+            const auto rewritten = JoinBaseUrlAndPath(selfhostApiBaseUrl, pathAndQuery);
+            AppendOfficialRequestAudit("webview_url_rewritten", original, {{"rewritten", rewritten}, {"source", source}});
+            return Il2cppUtils::Il2CppString::New(rewritten);
+        }
+
         static Il2cppUtils::Il2CppString* RewriteApiBasePathString(Il2cppUtils::Il2CppString* value, const char* source) {
             if (!Config::enableOfflineApiMock) return value;
 
@@ -1170,6 +1237,19 @@ namespace LinkuraLocal::HookShare {
         Configuration_set_BasePath_Orig(self, RewriteApiBasePathString(value, "Configuration.set_BasePath"), mtd);
     }
 
+    DEFINE_HOOK(void, WebViewCtrl_LoadView, (void* self, Il2cppUtils::Il2CppString* url, void* mtd)) {
+        WebViewCtrl_LoadView_Orig(self, RewriteWebViewUrlString(url, "Tecotec.WebViewCtrl.LoadView"), mtd);
+    }
+
+    DEFINE_HOOK(void, WebViewObject_LoadURL, (void* self, Il2cppUtils::Il2CppString* url, void* mtd)) {
+        WebViewObject_LoadURL_Orig(self, RewriteWebViewUrlString(url, "WebViewObject.LoadURL"), mtd);
+    }
+
+    DEFINE_HOOK(void, WebViewObject_LoadHTML, (void* self, Il2cppUtils::Il2CppString* html, Il2cppUtils::Il2CppString* baseUrl, void* mtd)) {
+        auto rewrittenBaseUrl = RewriteWebViewUrlString(baseUrl, "WebViewObject.LoadHTML");
+        WebViewObject_LoadHTML_Orig(self, html, rewrittenBaseUrl, mtd);
+    }
+
     DEFINE_HOOK(void, CommonApiCache_UpdateFromCommonHeader, (void* self, void* header, void* mtd)) {
         if (Config::dbgMode || Config::enableOfflineApiMock) {
             auto klass = header ? Il2cppUtils::get_class_from_instance(header) : nullptr;
@@ -1395,6 +1475,9 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(Configuration_ctor_dictionaries, method ? method->methodPointer : 0);
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
         ADD_HOOK(Configuration_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_BasePath"));
+        ADD_HOOK(WebViewCtrl_LoadView, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Tecotec", "WebViewCtrl", "LoadView"));
+        ADD_HOOK(WebViewObject_LoadURL, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "WebViewObject", "LoadURL"));
+        ADD_HOOK(WebViewObject_LoadHTML, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "WebViewObject", "LoadHTML"));
         auto CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "", "CommonApiCache");
         if (!CommonApiCache_klass) {
             Log::WarnFmt("[CommonApiCache] class not found");
