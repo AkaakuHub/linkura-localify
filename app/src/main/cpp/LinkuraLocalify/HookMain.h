@@ -61,6 +61,7 @@ namespace LinkuraLocal::HookShare {
     std::string replaceUriHost(const std::string& external_link, const std::string& assets_url);
     bool IsOfficialAssetUrl(const std::string& uri);
     void AppendOfficialRequestAudit(const std::string& kind, const std::string& target, const nlohmann::json& detail = nlohmann::json::object());
+    void AppendOfficialApiExceptionDump(const std::string& exceptionText);
     namespace Shareable {
         struct ArchiveData {
             std::string id;

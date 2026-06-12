@@ -12,7 +12,9 @@ namespace LinkuraLocal::HookDebug {
     DEFINE_HOOK(void, Internal_LogException, (void* ex, void* obj)) {
         Internal_LogException_Orig(ex, obj);
         static auto Exception_ToString = Il2cppUtils::GetMethod("mscorlib.dll", "System", "Exception", "ToString");
-        Log::LogUnityLog(ANDROID_LOG_ERROR, "UnityLog - Internal_LogException:\n%s", Exception_ToString->Invoke<Il2cppString*>(ex)->ToString().c_str());
+        const auto exceptionText = Exception_ToString->Invoke<Il2cppString*>(ex)->ToString();
+        Log::LogUnityLog(ANDROID_LOG_ERROR, "UnityLog - Internal_LogException:\n%s", exceptionText.c_str());
+        HookShare::AppendOfficialApiExceptionDump(exceptionText);
     }
 
     DEFINE_HOOK(void, Internal_Log, (int logType, int logOption, UnityResolve::UnityType::String* content, void* context)) {

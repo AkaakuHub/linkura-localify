@@ -37,6 +37,14 @@ namespace LinkuraLocal::HookShare {
             return s_getHeadersMi;
         }
 
+        static Il2cppUtils::MethodInfo* ResolveRestResponseGetter(const char* name) {
+            auto method = Il2cppUtils::GetMethodIl2cpp("RestSharp.dll", "RestSharp", "RestResponseBase", name, 0);
+            if (!method) {
+                method = Il2cppUtils::GetMethodIl2cpp("RestSharp", "RestSharp", "RestResponseBase", name, 0);
+            }
+            return method;
+        }
+
         static std::string LowercaseAscii(std::string value) {
             for (auto& ch : value) {
                 if (ch >= 'A' && ch <= 'Z') {
@@ -240,6 +248,123 @@ namespace LinkuraLocal::HookShare {
             // Log::VerboseFmt("[ApiClient_Deserialize] response headers dump end response=%p count=%d", response, idx);
         }
 
+        static nlohmann::json ReadRestResponseHeaders(void* response) {
+            nlohmann::json headers = nlohmann::json::array();
+            if (!IsRestSharpResponse(response)) return headers;
+
+            auto getHeadersMi = ResolveRestResponseGetHeaders();
+            if (!getHeadersMi) return headers;
+
+            UnityResolve::ThreadAttach();
+
+            using GetHeadersFn = void*(*)(void*, Il2cppUtils::MethodInfo*);
+            auto headersObj = reinterpret_cast<GetHeadersFn>(getHeadersMi->methodPointer)(response, getHeadersMi);
+            if (!headersObj) return headers;
+
+            auto hdrKlass = Il2cppUtils::get_class_from_instance(headersObj);
+            const bool isGenericList = hdrKlass
+                                    && hdrKlass->namespaze
+                                    && hdrKlass->name
+                                    && std::string_view(hdrKlass->namespaze) == "System.Collections.Generic"
+                                    && std::string_view(hdrKlass->name).find("List`1") != std::string_view::npos;
+            if (!isGenericList) return headers;
+
+            auto list = reinterpret_cast<UnityResolve::UnityType::List<void*>*>(headersObj);
+            if (!list || !list->pList) return headers;
+
+            static void* s_paramKlass = nullptr;
+            static Il2cppUtils::MethodInfo* s_paramGetNameMi = nullptr;
+            static Il2cppUtils::MethodInfo* s_paramGetValueMi = nullptr;
+            static bool s_paramResolved = false;
+            if (!s_paramResolved) {
+                s_paramResolved = true;
+                s_paramKlass = Il2cppUtils::GetClassIl2cpp("RestSharp.dll", "RestSharp", "Parameter");
+                if (!s_paramKlass) s_paramKlass = Il2cppUtils::GetClassIl2cpp("RestSharp", "RestSharp", "Parameter");
+                if (s_paramKlass) {
+                    s_paramGetNameMi = Il2cppUtils::GetMethodIl2cpp(s_paramKlass, "get_Name", 0);
+                    s_paramGetValueMi = Il2cppUtils::GetMethodIl2cpp(s_paramKlass, "get_Value", 0);
+                }
+            }
+
+            const int cap = static_cast<int>(list->pList->max_length);
+            const int n = (list->size < cap) ? list->size : cap;
+            for (int i = 0; i < n && i < 256; ++i) {
+                auto param = list->pList->At(static_cast<unsigned>(i));
+                if (!param) continue;
+
+                std::string name;
+                std::string value;
+
+                if (s_paramGetNameMi) {
+                    using GetStrFn = Il2cppUtils::Il2CppString*(*)(void*, Il2cppUtils::MethodInfo*);
+                    auto s = reinterpret_cast<GetStrFn>(s_paramGetNameMi->methodPointer)(param, s_paramGetNameMi);
+                    if (s) name = s->ToString();
+                }
+
+                if (s_paramGetValueMi) {
+                    using GetObjFn = void*(*)(void*, Il2cppUtils::MethodInfo*);
+                    auto v = reinterpret_cast<GetObjFn>(s_paramGetValueMi->methodPointer)(param, s_paramGetValueMi);
+                    if (v) {
+                        const auto vk = Il2cppUtils::get_class_from_instance(v);
+                        const bool isString = vk
+                            && vk->namespaze
+                            && std::string_view(vk->namespaze) == "System"
+                            && vk->name
+                            && std::string_view(vk->name) == "String";
+                        if (isString) {
+                            value = static_cast<Il2cppUtils::Il2CppString*>(v)->ToString();
+                        } else if (vk && vk->namespaze && vk->name) {
+                            value = std::string(vk->namespaze) + "." + vk->name;
+                        } else {
+                            value = "(object)";
+                        }
+                    }
+                }
+
+                headers.push_back({
+                    {"name", name},
+                    {"value", value},
+                });
+            }
+            return headers;
+        }
+
+        static nlohmann::json ReadRestResponseFields(void* response) {
+            nlohmann::json out = nlohmann::json::object();
+            if (!IsRestSharpResponse(response)) return out;
+
+            UnityResolve::ThreadAttach();
+
+            auto contentMi = ResolveRestResponseGetter("get_Content");
+            if (contentMi) {
+                using GetContentFn = Il2cppUtils::Il2CppString*(*)(void*, Il2cppUtils::MethodInfo*);
+                auto content = reinterpret_cast<GetContentFn>(contentMi->methodPointer)(response, contentMi);
+                out["content"] = content ? content->ToString() : "";
+            }
+
+            auto statusCodeMi = ResolveRestResponseGetter("get_StatusCode");
+            if (statusCodeMi) {
+                using GetIntFn = int(*)(void*, Il2cppUtils::MethodInfo*);
+                out["status_code"] = reinterpret_cast<GetIntFn>(statusCodeMi->methodPointer)(response, statusCodeMi);
+            }
+
+            auto statusDescriptionMi = ResolveRestResponseGetter("get_StatusDescription");
+            if (statusDescriptionMi) {
+                using GetStringFn = Il2cppUtils::Il2CppString*(*)(void*, Il2cppUtils::MethodInfo*);
+                auto desc = reinterpret_cast<GetStringFn>(statusDescriptionMi->methodPointer)(response, statusDescriptionMi);
+                out["status_description"] = desc ? desc->ToString() : "";
+            }
+
+            auto responseStatusMi = ResolveRestResponseGetter("get_ResponseStatus");
+            if (responseStatusMi) {
+                using GetIntFn = int(*)(void*, Il2cppUtils::MethodInfo*);
+                out["response_status"] = reinterpret_cast<GetIntFn>(responseStatusMi->methodPointer)(response, responseStatusMi);
+            }
+
+            out["headers"] = ReadRestResponseHeaders(response);
+            return out;
+        }
+
         void RememberOfficialApiRequest(const std::string& path, const nlohmann::json& request) {
             std::lock_guard<std::mutex> lock(apiAuditContextMutex);
             lastOfficialApiPath = path;
@@ -254,26 +379,16 @@ namespace LinkuraLocal::HookShare {
             };
         }
 
-        void AppendOfficialApiResponseDump(const nlohmann::json& responseJson, void* type) {
-            if (Config::enableOfflineApiMock || Config::assetsUrlPrefix.empty()) {
+        void AppendOfficialApiDump(nlohmann::json event) {
+            if (Config::enableOfflineApiMock) {
                 return;
             }
 
             auto context = CurrentOfficialApiRequestContext();
-            nlohmann::json event = {
-                {"request_path", context.value("path", "")},
-                {"request", context.value("request", "")},
-                {"response", responseJson},
-                {"current_client_version", Config::currentClientVersion.toString()},
-                {"current_res_version", Config::currentResVersion},
-            };
-
-            auto klass = UnityResolve::Invoke<void*>("il2cpp_class_from_system_type", type);
-            if (klass) {
-                auto ns = UnityResolve::Invoke<const char*>("il2cpp_class_get_namespace", klass);
-                auto name = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", klass);
-                event["response_type"] = std::string(ns ? ns : "") + "." + (name ? name : "");
-            }
+            event["request_path"] = context.value("path", "");
+            event["request"] = context.value("request", "");
+            event["current_client_version"] = Config::currentClientVersion.toString();
+            event["current_res_version"] = Config::currentResVersion;
 
             std::error_code ec;
             const auto dumpPath = Local::GetBasePath().parent_path() / "official_api_dump.jsonl";
@@ -284,6 +399,33 @@ namespace LinkuraLocal::HookShare {
             if (ofs.is_open()) {
                 ofs << event.dump() << '\n';
             }
+        }
+
+        void AddResponseType(nlohmann::json& event, void* type) {
+            auto klass = UnityResolve::Invoke<void*>("il2cpp_class_from_system_type", type);
+            if (!klass) return;
+
+            auto ns = UnityResolve::Invoke<const char*>("il2cpp_class_get_namespace", klass);
+            auto name = UnityResolve::Invoke<const char*>("il2cpp_class_get_name", klass);
+            event["response_type"] = std::string(ns ? ns : "") + "." + (name ? name : "");
+        }
+
+        void AppendOfficialApiRawResponseDump(void* response, void* type) {
+            nlohmann::json event = {
+                {"kind", "official_api_rest_response"},
+                {"rest_response", ReadRestResponseFields(response)},
+            };
+            AddResponseType(event, type);
+            AppendOfficialApiDump(std::move(event));
+        }
+
+        void AppendOfficialApiResponseDump(const nlohmann::json& responseJson, void* type) {
+            nlohmann::json event = {
+                {"kind", "official_api_deserialized_response"},
+                {"response", responseJson},
+            };
+            AddResponseType(event, type);
+            AppendOfficialApiDump(std::move(event));
         }
     } // namespace
 
@@ -386,6 +528,13 @@ namespace LinkuraLocal::HookShare {
         if (ofs.is_open()) {
             ofs << event.dump() << '\n';
         }
+    }
+
+    void AppendOfficialApiExceptionDump(const std::string& exceptionText) {
+        AppendOfficialApiDump({
+            {"kind", "official_api_exception"},
+            {"exception", exceptionText},
+        });
     }
 
     bool RewriteOfficialAssetUrls(nlohmann::json& value) {
@@ -1003,8 +1152,15 @@ namespace LinkuraLocal::HookShare {
             Log::VerboseFmt("[ApiClient_Deserialize] enter self=%p response=%p type=%p caller=%p", self, response, type, caller);
             DumpRestResponseHeadersIfPossible(response);
         }
+        AppendOfficialApiRawResponseDump(response, type);
         auto result = ApiClient_Deserialize_Orig(self, response, type, method_info);
-        auto json = nlohmann::json::parse(Il2cppUtils::ToJsonStr(result)->ToString());
+        auto json = nlohmann::json::parse(Il2cppUtils::ToJsonStr(result)->ToString(), nullptr, false);
+        if (json.is_discarded()) {
+            AppendOfficialApiDump({
+                {"kind", "official_api_deserialize_json_parse_failed"},
+            });
+            return result;
+        }
         AppendOfficialApiResponseDump(json, type);
         if (RewriteOfficialAssetUrls(json)) {
             result = Il2cppUtils::FromJsonStr(json.dump(), type);
