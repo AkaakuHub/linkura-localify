@@ -13,6 +13,7 @@ namespace LinkuraLocal::HookShare {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
+        Il2cppUtils::MethodInfo* commonApiCacheSetLauncherInfoMethod = nullptr;
 
         static bool IsRestSharpResponse(void* response) {
             if (!response) return false;
@@ -446,6 +447,16 @@ namespace LinkuraLocal::HookShare {
             auto json = nlohmann::json::parse(jsonString->ToString(), nullptr, false);
             if (json.is_discarded()) return jsonString->ToString();
             return json;
+        }
+
+        std::string GetCaseInsensitiveStringValue(const nlohmann::json& value, const std::string& key) {
+            if (!value.is_object()) return "";
+            for (const auto& item : value.items()) {
+                if (LowercaseAscii(item.key()) == key && item.value().is_string()) {
+                    return item.value().get<std::string>();
+                }
+            }
+            return "";
         }
     } // namespace
 
@@ -1470,7 +1481,17 @@ namespace LinkuraLocal::HookShare {
         WebViewObject_LoadHTML_Orig(self, html, rewrittenBaseUrl, mtd);
     }
 
+    DEFINE_HOOK(void, CommonApiCache_set__LauncherInfo, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
+        if (Config::dbgMode || Config::enableOfflineApiMock) {
+            Log::InfoFmt("[CommonApiCache] set__LauncherInfo value=%s",
+                         value ? value->ToString().c_str() : "(null)");
+        }
+        CommonApiCache_set__LauncherInfo_Orig(self, value, mtd);
+    }
+
     DEFINE_HOOK(void, CommonApiCache_UpdateFromCommonHeader, (void* self, void* header, void* mtd)) {
+        const auto headerJson = ObjectToJsonOrString(header);
+        const auto launcherInfo = GetCaseInsensitiveStringValue(headerJson, "launcher_info");
         if (Config::dbgMode || Config::enableOfflineApiMock) {
             auto klass = header ? Il2cppUtils::get_class_from_instance(header) : nullptr;
             Log::InfoFmt("[CommonApiCache] UpdateFromCommonHeader self=%p header=%p type=%s.%s",
@@ -1478,16 +1499,16 @@ namespace LinkuraLocal::HookShare {
                          header,
                          klass && klass->namespaze ? klass->namespaze : "",
                          klass && klass->name ? klass->name : "");
+            Log::InfoFmt("[CommonApiCache] header=%s", headerJson.dump().c_str());
         }
         CommonApiCache_UpdateFromCommonHeader_Orig(self, header, mtd);
-    }
-
-    DEFINE_HOOK(void, CommonApiCache_set__LauncherInfo, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
-        if (Config::dbgMode || Config::enableOfflineApiMock) {
-            Log::InfoFmt("[CommonApiCache] set__LauncherInfo value=%s",
-                         value ? value->ToString().c_str() : "(null)");
+        if (!launcherInfo.empty() && commonApiCacheSetLauncherInfoMethod) {
+            const auto value = Il2cppUtils::Il2CppString::New(launcherInfo);
+            CommonApiCache_set__LauncherInfo_Orig(self, value, commonApiCacheSetLauncherInfoMethod);
+            if (Config::dbgMode || Config::enableOfflineApiMock) {
+                Log::InfoFmt("[CommonApiCache] forced launcher_info value=%s", launcherInfo.c_str());
+            }
         }
-        CommonApiCache_set__LauncherInfo_Orig(self, value, mtd);
     }
 
     DEFINE_HOOK(int32_t, CommonApiCache_GetLauncherInfoStatus, (void* self, Il2cppUtils::Il2CppString* key, void* mtd)) {
@@ -1736,13 +1757,17 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(WebViewCtrl_LoadView, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Tecotec", "WebViewCtrl", "LoadView"));
         ADD_HOOK(WebViewObject_LoadURL, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "WebViewObject", "LoadURL"));
         ADD_HOOK(WebViewObject_LoadHTML, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "", "WebViewObject", "LoadHTML"));
-        auto CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "", "CommonApiCache");
+        auto CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "CommonApiCache");
+        if (!CommonApiCache_klass) {
+            CommonApiCache_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "", "CommonApiCache");
+        }
         if (!CommonApiCache_klass) {
             Log::WarnFmt("[CommonApiCache] class not found");
         } else {
             auto updateFromCommonHeader = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "UpdateFromCommonHeader", 1);
             auto setLauncherInfo = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "set__LauncherInfo", 1);
             auto getLauncherInfoStatus = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "GetLauncherInfoStatus", 1);
+            commonApiCacheSetLauncherInfoMethod = setLauncherInfo;
             ADD_HOOK(CommonApiCache_UpdateFromCommonHeader, updateFromCommonHeader ? updateFromCommonHeader->methodPointer : 0);
             ADD_HOOK(CommonApiCache_set__LauncherInfo, setLauncherInfo ? setLauncherInfo->methodPointer : 0);
             ADD_HOOK(CommonApiCache_GetLauncherInfoStatus, getLauncherInfoStatus ? getLauncherInfoStatus->methodPointer : 0);
