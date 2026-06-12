@@ -589,7 +589,10 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                     }
 
                     if (!l4DataInited) {
+                        Log.e(TAG, "Config is not initialized before native hook setup. Requesting config launcher and skipping hook initialization.")
+                        LogExporter.addLogEntry(TAG, "E", "Config is not initialized before native hook setup")
                         requestConfig(app.applicationContext)
+                        return
                     }
 
                     FilesChecker.initDir(app.filesDir, modulePath)
@@ -860,68 +863,74 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         val archiveData = intent.getStringExtra("archiveData")
         val clientResData = intent.getStringExtra("clientResData")
 
-        if (l4Data != null) {
-            val readVersion = intent.getStringExtra("lVerName")
-            checkPluginVersion(activity, readVersion)
-
-            l4DataInited = true
-            val initConfig = try {
-                json.decodeFromString<LinkuraConfig>(l4Data)
-            }
-            catch (e: Exception) {
-                null
-            }
-            // Store the config for later access
-            linkuraConfig = initConfig
-            val programConfig = try {
-                if (programData == null) {
-                    ProgramConfig()
-                } else {
-                    json.decodeFromString<ProgramConfig>(programData)
-                }
-            }
-            catch (e: Exception) {
-                null
-            }
-
-            // 清理本地文件
-            if (programConfig?.cleanLocalAssets == true) {
-                FilesChecker.cleanAssets()
-            }
-
-            // 强制使用插件版本的 assets 文件，并覆盖至目标应用，对开发很有用
-            if (programConfig?.usePluginBuiltInAssets == true) {
-                FilesChecker.updateFiles()
-            }
-            // 使用热更新文件
-            if (programConfig?.useRemoteAssets == true || programConfig?.useAPIAssets == true) {
-                // val dataUri = intent.data
-                val dataUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    intent.getParcelableExtra("resource_file", Uri::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra<Uri>("resource_file")
-                }
-                if (dataUri != null) {
-                    if (!externalFilesChecked) {
-                        externalFilesChecked = true
-                        // Log.d(TAG, "dataUri: $dataUri")
-                        FileHotUpdater.updateFilesFromZip(activity, dataUri, activity.filesDir,
-                            programConfig.delRemoteAfterUpdate)
-                    }
-                }
-                else if (programConfig.useAPIAssets) {
-                    if (!File(activity.filesDir, localizationFilesDir).exists()) {
-                        // 使用 API 资源，不检查内置，API 资源无效，且游戏内没有插件数据时，释放内置数据
-                        FilesChecker.initAndCheck(activity.filesDir, modulePath)
-                    }
-                }
-            }
-
-            loadConfig(l4Data)
-            Log.d(TAG, "l4Data: $l4Data")
-            // Load archive configuration if available
+        if (l4Data == null) {
+            Log.e(TAG, "Missing l4Data on game launch. Restarting through localify config launcher.")
+            LogExporter.addLogEntry(TAG, "E", "Missing l4Data on game launch")
+            requestConfig(activity)
+            activity.finish()
+            return
         }
+
+        val readVersion = intent.getStringExtra("lVerName")
+        checkPluginVersion(activity, readVersion)
+
+        l4DataInited = true
+        val initConfig = try {
+            json.decodeFromString<LinkuraConfig>(l4Data)
+        }
+        catch (e: Exception) {
+            null
+        }
+        // Store the config for later access
+        linkuraConfig = initConfig
+        val programConfig = try {
+            if (programData == null) {
+                ProgramConfig()
+            } else {
+                json.decodeFromString<ProgramConfig>(programData)
+            }
+        }
+        catch (e: Exception) {
+            null
+        }
+
+        // 清理本地文件
+        if (programConfig?.cleanLocalAssets == true) {
+            FilesChecker.cleanAssets()
+        }
+
+        // 强制使用插件版本的 assets 文件，并覆盖至目标应用，对开发很有用
+        if (programConfig?.usePluginBuiltInAssets == true) {
+            FilesChecker.updateFiles()
+        }
+        // 使用热更新文件
+        if (programConfig?.useRemoteAssets == true || programConfig?.useAPIAssets == true) {
+            // val dataUri = intent.data
+            val dataUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra("resource_file", Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra<Uri>("resource_file")
+            }
+            if (dataUri != null) {
+                if (!externalFilesChecked) {
+                    externalFilesChecked = true
+                    // Log.d(TAG, "dataUri: $dataUri")
+                    FileHotUpdater.updateFilesFromZip(activity, dataUri, activity.filesDir,
+                        programConfig.delRemoteAfterUpdate)
+                }
+            }
+            else if (programConfig.useAPIAssets) {
+                if (!File(activity.filesDir, localizationFilesDir).exists()) {
+                    // 使用 API 资源，不检查内置，API 资源无效，且游戏内没有插件数据时，释放内置数据
+                    FilesChecker.initAndCheck(activity.filesDir, modulePath)
+                }
+            }
+        }
+
+        loadConfig(l4Data)
+        Log.d(TAG, "l4Data: $l4Data")
+        // Load archive configuration if available
         if (archiveData != null) {
             loadArchiveConfig(archiveData)
             Log.d(TAG, "archiveData loaded")
