@@ -115,12 +115,25 @@ fun <T> T.onClickStartGame() where T : Activity, T : IHasConfigItems {
         programConfig.checkBuiltInAssets = true
     }
 
+    val configContent = getConfigContent()
+    val startConfig = try {
+        json.decodeFromString<LinkuraConfig>(configContent)
+    } catch (e: SerializationException) {
+        LinkuraConfig()
+    }
+    val selfhostMode = if (startConfig.enableOfflineApiMock) "ON" else "OFF"
+    Toast.makeText(
+        this,
+        "Start Linkura: Selfhost API $selfhostMode",
+        Toast.LENGTH_LONG
+    ).show()
+
     val intent = Intent().apply {
         setClassName(
             "com.oddno.lovelive",
             "com.unity3d.player.UnityPlayerActivity"
         )
-        putExtra("l4Data", getConfigContent())
+        putExtra("l4Data", configContent)
         putExtra(
             "localData",
             getProgramConfigContent(listOf("transRemoteZipUrl", "useAPIAssetsURL",

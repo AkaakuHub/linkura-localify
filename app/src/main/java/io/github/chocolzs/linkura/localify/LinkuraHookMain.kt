@@ -589,10 +589,9 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                     }
 
                     if (!l4DataInited) {
-                        Log.e(TAG, "Config is not initialized before native hook setup. Requesting config launcher and skipping hook initialization.")
-                        LogExporter.addLogEntry(TAG, "E", "Config is not initialized before native hook setup")
+                        Log.w(TAG, "Config is not initialized before native hook setup. Requesting config launcher.")
+                        LogExporter.addLogEntry(TAG, "W", "Config is not initialized before native hook setup")
                         requestConfig(app.applicationContext)
-                        return
                     }
 
                     FilesChecker.initDir(app.filesDir, modulePath)
@@ -864,10 +863,8 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         val clientResData = intent.getStringExtra("clientResData")
 
         if (l4Data == null) {
-            Log.e(TAG, "Missing l4Data on game launch. Restarting through localify config launcher.")
-            LogExporter.addLogEntry(TAG, "E", "Missing l4Data on game launch")
-            requestConfig(activity)
-            activity.finish()
+            Log.w(TAG, "Missing l4Data on game launch. Waiting for localify config launcher.")
+            LogExporter.addLogEntry(TAG, "W", "Missing l4Data on game launch")
             return
         }
 
@@ -883,6 +880,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
         // Store the config for later access
         linkuraConfig = initConfig
+        showSelfhostMode("Config loaded")
         val programConfig = try {
             if (programData == null) {
                 ProgramConfig()
@@ -945,6 +943,16 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         if (clientResData != null) {
             processClientResourceData(clientResData, versionName)
         }
+    }
+
+    private fun showSelfhostMode(prefix: String) {
+        val config = linkuraConfig ?: return
+        val mode = if (config.enableOfflineApiMock) "ON" else "OFF"
+        val apiUrl = config.apiMockBaseUrl.ifEmpty { "(empty)" }
+        val message = "$prefix: Selfhost API $mode\nAPI: $apiUrl"
+        showToast(message)
+        Log.i(TAG, message)
+        LogExporter.addLogEntry(TAG, "I", message)
     }
 
     private fun processClientResourceData(clientResData: String, currentVersionName: String) {
