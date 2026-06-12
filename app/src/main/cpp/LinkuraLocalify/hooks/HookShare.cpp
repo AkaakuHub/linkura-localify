@@ -1227,10 +1227,18 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void, ApiClient_ctor_string, (void* self, Il2cppUtils::Il2CppString* basePath, void* mtd)) {
+        if (!Config::enableOfflineApiMock) {
+            ApiClient_ctor_string_Orig(self, basePath, mtd);
+            return;
+        }
         ApiClient_ctor_string_Orig(self, RewriteApiBasePathString(basePath, "ApiClient.ctor(string)"), mtd);
     }
 
     DEFINE_HOOK(void, Configuration_ctor_dictionaries, (void* self, void* defaultHeader, void* apiKey, void* apiKeyPrefix, Il2cppUtils::Il2CppString* basePath, void* mtd)) {
+        if (!Config::enableOfflineApiMock) {
+            Configuration_ctor_dictionaries_Orig(self, defaultHeader, apiKey, apiKeyPrefix, basePath, mtd);
+            return;
+        }
         Configuration_ctor_dictionaries_Orig(self,
                                              defaultHeader,
                                              apiKey,
@@ -1248,6 +1256,10 @@ namespace LinkuraLocal::HookShare {
     }
 
     DEFINE_HOOK(void, Configuration_set_BasePath, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
+        if (!Config::enableOfflineApiMock) {
+            Configuration_set_BasePath_Orig(self, value, mtd);
+            return;
+        }
         Configuration_set_BasePath_Orig(self, RewriteApiBasePathString(value, "Configuration.set_BasePath"), mtd);
     }
 

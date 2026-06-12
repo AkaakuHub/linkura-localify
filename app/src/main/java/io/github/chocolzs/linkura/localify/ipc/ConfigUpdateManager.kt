@@ -78,8 +78,18 @@ class ConfigUpdateManager private constructor() {
                 if (config.topUrlPrefix != null) topUrlPrefix = config.topUrlPrefix
             }.build()
 
-            serviceInstance?.sendMessage(MessageType.CONFIG_UPDATE, configUpdate)
-            true
+            Log.i(
+                TAG,
+                "Sending config update: enableOfflineApiMock=${config.enableOfflineApiMock}, apiMockBaseUrl=${config.apiMockBaseUrl}, assetsUrlPrefix=${config.assetsUrlPrefix}, topUrlPrefix=${config.topUrlPrefix}"
+            )
+            val service = serviceInstance
+            if (service == null) {
+                Log.w(TAG, "Config update skipped because AIDL service is not running")
+                false
+            } else {
+                service.sendMessage(MessageType.CONFIG_UPDATE, configUpdate)
+                true
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error sending config update", e)
             false
