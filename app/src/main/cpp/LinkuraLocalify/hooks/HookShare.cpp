@@ -427,6 +427,26 @@ namespace LinkuraLocal::HookShare {
             AddResponseType(event, type);
             AppendOfficialApiDump(std::move(event));
         }
+
+        nlohmann::json ObjectToJsonOrString(void* value) {
+            if (!value) return nullptr;
+
+            const auto klass = Il2cppUtils::get_class_from_instance(value);
+            const bool isString = klass
+                && klass->namespaze
+                && std::string_view(klass->namespaze) == "System"
+                && klass->name
+                && std::string_view(klass->name) == "String";
+            if (isString) {
+                return static_cast<Il2cppUtils::Il2CppString*>(value)->ToString();
+            }
+
+            auto jsonString = Il2cppUtils::ToJsonStr(value);
+            if (!jsonString) return "(serialize_failed)";
+            auto json = nlohmann::json::parse(jsonString->ToString(), nullptr, false);
+            if (json.is_discarded()) return jsonString->ToString();
+            return json;
+        }
     } // namespace
 
     namespace Shareable {
@@ -535,6 +555,24 @@ namespace LinkuraLocal::HookShare {
             {"kind", "official_api_exception"},
             {"exception", exceptionText},
         });
+    }
+
+    void AppendOfficialApiExceptionCtorDump(int errorCode,
+                                            Il2cppUtils::Il2CppString* message,
+                                            void* errorContent,
+                                            void* headers) {
+        nlohmann::json event = {
+            {"kind", "official_api_exception_ctor"},
+            {"error_code", errorCode},
+            {"message", message ? message->ToString() : ""},
+        };
+        if (errorContent) {
+            event["error_content"] = ObjectToJsonOrString(errorContent);
+        }
+        if (headers) {
+            event["headers"] = ObjectToJsonOrString(headers);
+        }
+        AppendOfficialApiDump(std::move(event));
     }
 
     bool RewriteOfficialAssetUrls(nlohmann::json& value) {
@@ -1509,6 +1547,33 @@ namespace LinkuraLocal::HookShare {
         }
         return result;
     }
+
+    DEFINE_HOOK(void, ApiException_ctor_2, (void* self,
+                                            int errorCode,
+                                            Il2cppUtils::Il2CppString* message,
+                                            void* method_info)) {
+        ApiException_ctor_2_Orig(self, errorCode, message, method_info);
+        AppendOfficialApiExceptionCtorDump(errorCode, message, nullptr, nullptr);
+    }
+
+    DEFINE_HOOK(void, ApiException_ctor_3, (void* self,
+                                            int errorCode,
+                                            Il2cppUtils::Il2CppString* message,
+                                            void* errorContent,
+                                            void* method_info)) {
+        ApiException_ctor_3_Orig(self, errorCode, message, errorContent, method_info);
+        AppendOfficialApiExceptionCtorDump(errorCode, message, errorContent, nullptr);
+    }
+
+    DEFINE_HOOK(void, ApiException_ctor_4, (void* self,
+                                            int errorCode,
+                                            Il2cppUtils::Il2CppString* message,
+                                            void* errorContent,
+                                            void* headers,
+                                            void* method_info)) {
+        ApiException_ctor_4_Orig(self, errorCode, message, errorContent, headers, method_info);
+        AppendOfficialApiExceptionCtorDump(errorCode, message, errorContent, headers);
+    }
 #pragma region
 
     void Install(HookInstaller* hookInstaller) {
@@ -1519,6 +1584,17 @@ namespace LinkuraLocal::HookShare {
         // GetHttpAsyncAddr
         ADD_HOOK(ApiClient_CallApiAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "CallApiAsync"));
         ADD_HOOK(ApiClient_Deserialize, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "Deserialize"));
+        auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
+        if (ApiException_klass) {
+            auto apiExceptionMethod = Il2cppUtils::GetMethodIl2cpp(ApiException_klass, ".ctor", 2);
+            ADD_HOOK(ApiException_ctor_2, apiExceptionMethod ? apiExceptionMethod->methodPointer : 0);
+            apiExceptionMethod = Il2cppUtils::GetMethodIl2cpp(ApiException_klass, ".ctor", 3);
+            ADD_HOOK(ApiException_ctor_3, apiExceptionMethod ? apiExceptionMethod->methodPointer : 0);
+            apiExceptionMethod = Il2cppUtils::GetMethodIl2cpp(ApiException_klass, ".ctor", 4);
+            ADD_HOOK(ApiException_ctor_4, apiExceptionMethod ? apiExceptionMethod->methodPointer : 0);
+        } else {
+            Log::Warn("[OfficialApiDump] ApiException class not found");
+        }
 #pragma region ArchiveApi
         auto ArchiveApi_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Api", "ArchiveApi");
         auto method = (Il2cppUtils::MethodInfo*) nullptr;
