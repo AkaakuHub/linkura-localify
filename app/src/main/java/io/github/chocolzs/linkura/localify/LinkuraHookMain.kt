@@ -880,7 +880,6 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         }
         // Store the config for later access
         linkuraConfig = initConfig
-        showSelfhostMode("Config loaded")
         val programConfig = try {
             if (programData == null) {
                 ProgramConfig()
@@ -943,16 +942,6 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         if (clientResData != null) {
             processClientResourceData(clientResData, versionName)
         }
-    }
-
-    private fun showSelfhostMode(prefix: String) {
-        val config = linkuraConfig ?: return
-        val mode = if (config.enableOfflineApiMock) "ON" else "OFF"
-        val apiUrl = config.apiMockBaseUrl.ifEmpty { "(empty)" }
-        val message = "$prefix: Selfhost API $mode\nAPI: $apiUrl"
-        showToast(message)
-        Log.i(TAG, message)
-        LogExporter.addLogEntry(TAG, "I", message)
     }
 
     private fun processClientResourceData(clientResData: String, currentVersionName: String) {
