@@ -13,7 +13,6 @@ namespace LinkuraLocal::HookShare {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
-        Il2cppUtils::MethodInfo* commonApiCacheSetLauncherInfoMethod = nullptr;
 
         static bool IsRestSharpResponse(void* response) {
             if (!response) return false;
@@ -449,14 +448,36 @@ namespace LinkuraLocal::HookShare {
             return json;
         }
 
-        std::string GetCaseInsensitiveStringValue(const nlohmann::json& value, const std::string& key) {
-            if (!value.is_object()) return "";
-            for (const auto& item : value.items()) {
-                if (LowercaseAscii(item.key()) == key && item.value().is_string()) {
-                    return item.value().get<std::string>();
-                }
+        int AddLowercaseStringHeaderAliases(void* header, const nlohmann::json& headerJson) {
+            if (!header || !headerJson.is_object()) return 0;
+
+            auto klass = Il2cppUtils::get_class_from_instance(header);
+            if (!klass) return 0;
+
+            auto containsKeyMethod = Il2cppUtils::GetMethodIl2cpp(klass, "ContainsKey", 1);
+            auto addMethod = Il2cppUtils::GetMethodIl2cpp(klass, "Add", 2);
+            if (!containsKeyMethod || !addMethod) return 0;
+
+            using ContainsKeyFn = bool(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+            using AddFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+            const auto containsKey = reinterpret_cast<ContainsKeyFn>(containsKeyMethod->methodPointer);
+            const auto add = reinterpret_cast<AddFn>(addMethod->methodPointer);
+
+            int added = 0;
+            for (const auto& item : headerJson.items()) {
+                if (!item.value().is_string()) continue;
+
+                auto loweredKey = LowercaseAscii(item.key());
+                if (loweredKey == item.key()) continue;
+
+                auto il2cppKey = Il2cppUtils::Il2CppString::New(loweredKey);
+                if (containsKey(header, il2cppKey, containsKeyMethod)) continue;
+
+                auto il2cppValue = Il2cppUtils::Il2CppString::New(item.value().get<std::string>());
+                add(header, il2cppKey, il2cppValue, addMethod);
+                ++added;
             }
-            return "";
+            return added;
         }
     } // namespace
 
@@ -1491,7 +1512,7 @@ namespace LinkuraLocal::HookShare {
 
     DEFINE_HOOK(void, CommonApiCache_UpdateFromCommonHeader, (void* self, void* header, void* mtd)) {
         const auto headerJson = ObjectToJsonOrString(header);
-        const auto launcherInfo = GetCaseInsensitiveStringValue(headerJson, "launcher_info");
+        const auto normalizedCount = AddLowercaseStringHeaderAliases(header, headerJson);
         if (Config::dbgMode || Config::enableOfflineApiMock) {
             auto klass = header ? Il2cppUtils::get_class_from_instance(header) : nullptr;
             Log::InfoFmt("[CommonApiCache] UpdateFromCommonHeader self=%p header=%p type=%s.%s",
@@ -1500,15 +1521,11 @@ namespace LinkuraLocal::HookShare {
                          klass && klass->namespaze ? klass->namespaze : "",
                          klass && klass->name ? klass->name : "");
             Log::InfoFmt("[CommonApiCache] header=%s", headerJson.dump().c_str());
-        }
-        CommonApiCache_UpdateFromCommonHeader_Orig(self, header, mtd);
-        if (!launcherInfo.empty() && commonApiCacheSetLauncherInfoMethod) {
-            const auto value = Il2cppUtils::Il2CppString::New(launcherInfo);
-            CommonApiCache_set__LauncherInfo_Orig(self, value, commonApiCacheSetLauncherInfoMethod);
-            if (Config::dbgMode || Config::enableOfflineApiMock) {
-                Log::InfoFmt("[CommonApiCache] forced launcher_info value=%s", launcherInfo.c_str());
+            if (normalizedCount > 0) {
+                Log::InfoFmt("[CommonApiCache] added lowercase header aliases=%d", normalizedCount);
             }
         }
+        CommonApiCache_UpdateFromCommonHeader_Orig(self, header, mtd);
     }
 
     DEFINE_HOOK(int32_t, CommonApiCache_GetLauncherInfoStatus, (void* self, Il2cppUtils::Il2CppString* key, void* mtd)) {
@@ -1767,7 +1784,6 @@ namespace LinkuraLocal::HookShare {
             auto updateFromCommonHeader = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "UpdateFromCommonHeader", 1);
             auto setLauncherInfo = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "set__LauncherInfo", 1);
             auto getLauncherInfoStatus = Il2cppUtils::GetMethodIl2cpp(CommonApiCache_klass, "GetLauncherInfoStatus", 1);
-            commonApiCacheSetLauncherInfoMethod = setLauncherInfo;
             ADD_HOOK(CommonApiCache_UpdateFromCommonHeader, updateFromCommonHeader ? updateFromCommonHeader->methodPointer : 0);
             ADD_HOOK(CommonApiCache_set__LauncherInfo, setLauncherInfo ? setLauncherInfo->methodPointer : 0);
             ADD_HOOK(CommonApiCache_GetLauncherInfoStatus, getLauncherInfoStatus ? getLauncherInfoStatus->methodPointer : 0);
