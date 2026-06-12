@@ -1095,11 +1095,35 @@ namespace LinkuraLocal::HookShare {
             return url.starts_with("https://link-like-lovelive.app/");
         }
 
+        static nlohmann::json CreateWebViewRewriteState(const std::string& original, const char* source, bool hasValue) {
+            const auto pathAndQuery = ExtractUrlPathAndQuery(original);
+            return {
+                {"source", source},
+                {"has_value", hasValue},
+                {"enable_offline_api_mock", Config::enableOfflineApiMock},
+                {"api_mock_base_url", Config::apiMockBaseUrl},
+                {"top_url_prefix", Config::topUrlPrefix},
+                {"assets_url_prefix", Config::assetsUrlPrefix},
+                {"is_official_asset_url", IsOfficialAssetUrl(original)},
+                {"is_official_top_web_url", IsOfficialTopWebUrl(original)},
+                {"is_official_api_or_web_url", IsOfficialApiOrWebUrl(original)},
+                {"starts_with_slash", original.starts_with("/")},
+                {"path_and_query", pathAndQuery}
+            };
+        }
+
         static Il2cppUtils::Il2CppString* RewriteWebViewUrlString(Il2cppUtils::Il2CppString* value, const char* source) {
             const auto original = value ? value->ToString() : "(null)";
             AppendOfficialRequestAudit("webview_url_opened", original, {{"source", source}});
+            AppendOfficialRequestAudit("webview_rewrite_state", original, CreateWebViewRewriteState(original, source, value != nullptr));
 
-            if (!Config::enableOfflineApiMock || !value) {
+            if (!value) {
+                AppendOfficialRequestAudit("webview_url_not_rewritten", original, {{"source", source}, {"reason", "null_value"}});
+                return value;
+            }
+
+            if (!Config::enableOfflineApiMock) {
+                AppendOfficialRequestAudit("webview_url_not_rewritten", original, {{"source", source}, {"reason", "offline_api_mock_disabled"}});
                 return value;
             }
 
@@ -1124,6 +1148,7 @@ namespace LinkuraLocal::HookShare {
             }
 
             if (!IsOfficialApiOrWebUrl(original) && !original.starts_with("/")) {
+                AppendOfficialRequestAudit("webview_url_not_rewritten", original, {{"source", source}, {"reason", "non_official_url"}});
                 return value;
             }
 
@@ -1135,6 +1160,7 @@ namespace LinkuraLocal::HookShare {
 
             const auto pathAndQuery = ExtractUrlPathAndQuery(original);
             if (pathAndQuery.empty()) {
+                AppendOfficialRequestAudit("webview_url_not_rewritten", original, {{"source", source}, {"reason", "empty_path_and_query"}});
                 return value;
             }
 
