@@ -75,6 +75,7 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
     private val aidlClient: LinkuraAidlClient by lazy { LinkuraAidlClient.getInstance() }
     private val messageRouter: MessageRouter by lazy { MessageRouter() }
+    private val webViewApiCapture = WebViewApiCapture()
     private var isCameraInfoOverlayEnabled = false
     
     // Loop control variables
@@ -459,6 +460,8 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
         if (lpparam.packageName != targetPackageName) {
             return
         }
+
+        webViewApiCapture.install(lpparam.classLoader)
 
         XposedHelpers.findAndHookMethod(
             "android.app.Activity",
