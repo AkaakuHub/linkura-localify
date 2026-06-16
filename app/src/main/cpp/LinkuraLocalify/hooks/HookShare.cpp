@@ -380,15 +380,12 @@ namespace LinkuraLocal::HookShare {
         }
 
         void AppendOfficialApiDump(nlohmann::json event) {
-            if (Config::enableOfflineApiMock) {
-                return;
-            }
-
             auto context = CurrentOfficialApiRequestContext();
             event["request_path"] = context.value("path", "");
             event["request"] = context.value("request", "");
             event["current_client_version"] = Config::currentClientVersion.toString();
             event["current_res_version"] = Config::currentResVersion;
+            event["api_source"] = Config::enableOfflineApiMock ? "selfhost" : "official";
 
             std::error_code ec;
             const auto dumpPath = Local::GetBasePath().parent_path() / "official_api_dump.jsonl";
@@ -412,7 +409,7 @@ namespace LinkuraLocal::HookShare {
 
         void AppendOfficialApiRawResponseDump(void* response, void* type) {
             nlohmann::json event = {
-                {"kind", "official_api_rest_response"},
+                {"kind", Config::enableOfflineApiMock ? "selfhost_api_rest_response" : "official_api_rest_response"},
                 {"rest_response", ReadRestResponseFields(response)},
             };
             AddResponseType(event, type);
@@ -421,7 +418,7 @@ namespace LinkuraLocal::HookShare {
 
         void AppendOfficialApiResponseDump(const nlohmann::json& responseJson, void* type) {
             nlohmann::json event = {
-                {"kind", "official_api_deserialized_response"},
+                {"kind", Config::enableOfflineApiMock ? "selfhost_api_deserialized_response" : "official_api_deserialized_response"},
                 {"response", responseJson},
             };
             AddResponseType(event, type);
@@ -1222,6 +1219,7 @@ namespace LinkuraLocal::HookShare {
             auto selfhostAudit = requestAudit;
             selfhostAudit["base_url"] = selfhostApiBaseUrl;
             AppendOfficialRequestAudit("selfhost_api_request", strPath, selfhostAudit);
+            RememberOfficialApiRequest(strPath, requestAudit);
             Log::WarnFmt("[SelfhostAudit] selfhost_api_request path=%s base=%s",
                          strPath.c_str(), selfhostApiBaseUrl.c_str());
             return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
@@ -1253,7 +1251,7 @@ namespace LinkuraLocal::HookShare {
         auto json = nlohmann::json::parse(Il2cppUtils::ToJsonStr(result)->ToString(), nullptr, false);
         if (json.is_discarded()) {
             AppendOfficialApiDump({
-                {"kind", "official_api_deserialize_json_parse_failed"},
+                {"kind", Config::enableOfflineApiMock ? "selfhost_api_deserialize_json_parse_failed" : "official_api_deserialize_json_parse_failed"},
             });
             return result;
         }
