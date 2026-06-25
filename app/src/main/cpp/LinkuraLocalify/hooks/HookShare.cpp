@@ -510,10 +510,7 @@ namespace LinkuraLocal::HookShare {
         }
     }
 
-    // URL替换函数：将external_link中的URL替换为assets_url
     std::string replaceUriHost(const std::string& uri, const std::string& assets_url) {
-        // 使用RE2正则表达式匹配URL模式
-        // 匹配 https://foo.example.org 这样的URL，并考虑路径部分
         std::string pattern = R"(^https://[^/]+(/.*)?$)";
         RE2 re(pattern);
         
@@ -536,20 +533,9 @@ namespace LinkuraLocal::HookShare {
             }
             Log::VerboseFmt("URL replaced: %s -> %s", uri.c_str(), result.c_str());
             return result;
-        } else {
-            std::string result = assets_url;
-            if (!uri.empty()) {
-                if (!assets_url.empty() && assets_url.back() == '/' && uri.front() == '/') {
-                    result += uri.substr(1);
-                } else if (!assets_url.empty() && assets_url.back() != '/' && uri.front() != '/') {
-                    result += "/" + uri;
-                } else {
-                    result += uri;
-                }
-            }
-            Log::VerboseFmt("Path combined with assets_url: %s -> %s", uri.c_str(), result.c_str());
-            return result;
         }
+        Log::VerboseFmt("URI left unchanged: %s", uri.c_str());
+        return uri;
     }
 
     bool IsOfficialAssetUrl(const std::string& uri) {
