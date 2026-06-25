@@ -671,7 +671,7 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
-        if (Config::enableMotionCaptureReplay) {
+        if (Config::enableMotionCaptureReplay && !Config::enableOfflineApiMock) {
             auto archive_id = Shareable::currentArchiveId;
             auto it = Config::archiveConfigMap.find(archive_id);
             if (it == Config::archiveConfigMap.end()) return json;
@@ -717,7 +717,7 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
-        if (Config::enableMotionCaptureReplay) {
+        if (Config::enableMotionCaptureReplay && !Config::enableOfflineApiMock) {
             auto archive_id = Shareable::currentArchiveId;
             auto it = Config::archiveConfigMap.find(archive_id);
             if (it == Config::archiveConfigMap.end()) return json;
