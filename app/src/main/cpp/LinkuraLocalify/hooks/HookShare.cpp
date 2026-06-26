@@ -665,6 +665,9 @@ namespace LinkuraLocal::HookShare {
         if (Config::withliveOrientation == (int)HookLiveRender::LiveScreenOrientation::Portrait) {
             json["is_horizontal"] = "false";
         }
+        if (Config::unlockAfter) {
+            json["has_extra_admission"] = "true";
+        }
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
@@ -704,6 +707,9 @@ namespace LinkuraLocal::HookShare {
         return json;
     }
     nlohmann::json handle_get_fes_archive_data(nlohmann::json json, bool is_legacy = false) {
+        if (Config::unlockAfter) {
+            json["has_extra_admission"] = "true";
+        }
         if (Config::fesArchiveUnlockTicket) {
             json["selectable_camera_types"] = {1,2,3,4};
             json["ticket_rank"] = 6;
@@ -826,6 +832,9 @@ namespace LinkuraLocal::HookShare {
                 archive_list.end());
         for (auto& archive : archive_list) {
             auto archive_id = archive["archives_id"].get<std::string>();
+            if (Config::unlockAfter) {
+                archive["has_extra_admission"] = "true";
+            }
             if (Shareable::archiveData.find(archive_id) == Shareable::archiveData.end()) {
                 auto live_start_time = archive["live_start_time"].get<std::string>();
                 auto live_end_time = archive["live_end_time"].get<std::string>();
@@ -1278,6 +1287,9 @@ namespace LinkuraLocal::HookShare {
             if (Config::withliveOrientation == (int)HookLiveRender::LiveScreenOrientation::Portrait) {
                 json["is_horizontal"] = "false";
             }
+            if (Config::unlockAfter) {
+                json["has_extra_admission"] = "true";
+            }
             result = Il2cppUtils::FromJsonStr(json.dump(), type);
         }
 //        IF_CALLER_WITHIN(FesliveApi_FesliveEnterWithHttpInfoAsync_MoveNext_Addr, caller, 3000) {
@@ -1292,9 +1304,16 @@ namespace LinkuraLocal::HookShare {
 //        }
         // live info
         IF_CALLER_WITHIN(ArchiveApi_ArchiveWithliveInfoWithHttpInfoAsync_MoveNext_Addr, caller, 3000) {
+            if (Config::unlockAfter) {
+                json["has_extra_admission"] = "true";
+            }
             result = Il2cppUtils::FromJsonStr(json.dump(), type);
         }
         IF_CALLER_WITHIN(WithliveApi_WithliveLiveInfoWithHttpInfoAsync_MoveNext_Addr, caller, 3000) {
+            if (Config::unlockAfter) {
+                json["has_extra_admission"] = "true";
+//                json["has_admission"] = "true";
+            }
             result = Il2cppUtils::FromJsonStr(json.dump(), type);
         }
 //        IF_CALLER_WITHIN(FesliveApi_FesliveLiveInfoWithHttpInfoAsync_MoveNext_Addr, caller, 3000) {
