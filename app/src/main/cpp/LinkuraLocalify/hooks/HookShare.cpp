@@ -658,7 +658,24 @@ namespace LinkuraLocal::HookShare {
             json[key].clear();
         }
     }
+
+    std::string get_json_string_or_empty(const nlohmann::json& json, const std::string& key) {
+        if (!json.contains(key) || !json[key].is_string()) {
+            return "";
+        }
+        return json[key].get<std::string>();
+    }
+
     nlohmann::json handle_get_with_archive_data(nlohmann::json json, bool is_legacy = false) {
+        const auto archive_id = Shareable::currentArchiveId;
+        nlohmann::json audit = {
+            {"archive_id", archive_id},
+            {"enable_motion_capture_replay", Config::enableMotionCaptureReplay},
+            {"enable_offline_api_mock", Config::enableOfflineApiMock},
+            {"before_archive_url", get_json_string_or_empty(json, "archive_url")},
+            {"before_video_url", get_json_string_or_empty(json, "video_url")},
+            {"motion_replay_action", "disabled"},
+        };
         if (Config::withliveOrientation == (int)HookLiveRender::LiveScreenOrientation::Landscape) {
             json["is_horizontal"] = "true";
         }
@@ -671,14 +688,26 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
+        if (Config::enableMotionCaptureReplay && Config::enableOfflineApiMock) {
+            audit["motion_replay_action"] = "skipped_offline_api_mock";
+        }
         if (Config::enableMotionCaptureReplay && !Config::enableOfflineApiMock) {
-            auto archive_id = Shareable::currentArchiveId;
             auto it = Config::archiveConfigMap.find(archive_id);
-            if (it == Config::archiveConfigMap.end()) return json;
+            if (it == Config::archiveConfigMap.end()) {
+                audit["motion_replay_action"] = "config_not_found";
+                audit["after_archive_url"] = get_json_string_or_empty(json, "archive_url");
+                audit["after_video_url"] = get_json_string_or_empty(json, "video_url");
+                AppendOfficialRequestAudit("archive_get_with_data_localify_rewrite", archive_id, audit);
+                return json;
+            }
             auto archive_config = it->second;
             auto replay_type = archive_config["replay_type"].get<uint>();
             auto external_link = archive_config.contains("external_link") ? archive_config["external_link"].get<std::string>() : "";
             auto external_fix_link = archive_config.contains("external_fix_link") ? archive_config["external_fix_link"].get<std::string>() : "";
+            audit["motion_replay_action"] = "applied";
+            audit["replay_type"] = replay_type;
+            audit["external_link"] = external_link;
+            audit["external_fix_link"] = external_fix_link;
 
             auto assets_url = Config::motionCaptureResourceUrl;
             if (replay_type == 0) {
@@ -704,6 +733,9 @@ namespace LinkuraLocal::HookShare {
         if (is_legacy) {
             json = handle_legacy_archive_data(json);
         }
+        audit["after_archive_url"] = get_json_string_or_empty(json, "archive_url");
+        audit["after_video_url"] = get_json_string_or_empty(json, "video_url");
+        AppendOfficialRequestAudit("archive_get_with_data_localify_rewrite", archive_id, audit);
         return json;
     }
     nlohmann::json handle_get_fes_archive_data(nlohmann::json json, bool is_legacy = false) {
