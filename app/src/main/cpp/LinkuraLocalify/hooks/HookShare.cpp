@@ -538,6 +538,27 @@ namespace LinkuraLocal::HookShare {
         return uri;
     }
 
+    std::string joinBaseUrlAndPath(const std::string& base_url, const std::string& path) {
+        if (base_url.empty()) return path;
+        if (path.empty()) return base_url;
+        if (base_url.back() == '/' && path.front() == '/') {
+            return base_url + path.substr(1);
+        }
+        if (base_url.back() != '/' && path.front() != '/') {
+            return base_url + "/" + path;
+        }
+        return base_url + path;
+    }
+
+    std::string replaceArchiveAssetUri(const std::string& uri, const std::string& assets_url) {
+        if (uri.starts_with("/")) {
+            auto result = joinBaseUrlAndPath(assets_url, uri);
+            Log::VerboseFmt("URL joined: %s -> %s", uri.c_str(), result.c_str());
+            return result;
+        }
+        return replaceUriHost(uri, assets_url);
+    }
+
     bool IsOfficialAssetUrl(const std::string& uri) {
         return uri.starts_with("https://assets.link-like-lovelive.app/");
     }
@@ -688,10 +709,7 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
-        if (Config::enableMotionCaptureReplay && Config::enableOfflineApiMock) {
-            audit["motion_replay_action"] = "skipped_offline_api_mock";
-        }
-        if (Config::enableMotionCaptureReplay && !Config::enableOfflineApiMock) {
+        if (Config::enableMotionCaptureReplay) {
             auto it = Config::archiveConfigMap.find(archive_id);
             if (it == Config::archiveConfigMap.end()) {
                 audit["motion_replay_action"] = "config_not_found";
@@ -716,14 +734,14 @@ namespace LinkuraLocal::HookShare {
             if (replay_type == 1) {
                 json.erase("video_url");
                 if (!external_link.empty()) {
-                    auto new_external_link = replaceUriHost(external_link, assets_url);
+                    auto new_external_link = replaceArchiveAssetUri(external_link, assets_url);
                     json["archive_url"] = new_external_link;
                 }
             }
             if (replay_type == 2) {
                 json.erase("video_url");
                 if (!external_fix_link.empty()) {
-                    auto new_external_fix_link = replaceUriHost(external_fix_link, assets_url);
+                    auto new_external_fix_link = replaceArchiveAssetUri(external_fix_link, assets_url);
                     json["archive_url"] = new_external_fix_link;
                 }
             }
@@ -749,7 +767,7 @@ namespace LinkuraLocal::HookShare {
         if (Config::enableSetArchiveStartTime) {
             json["chapters"][0]["play_time_second"] = Config::archiveStartTime;
         }
-        if (Config::enableMotionCaptureReplay && !Config::enableOfflineApiMock) {
+        if (Config::enableMotionCaptureReplay) {
             auto archive_id = Shareable::currentArchiveId;
             auto it = Config::archiveConfigMap.find(archive_id);
             if (it == Config::archiveConfigMap.end()) return json;
@@ -764,14 +782,14 @@ namespace LinkuraLocal::HookShare {
             if (replay_type == 1) {
                 json.erase("video_url");
                 if (!external_link.empty()) {
-                    auto new_external_link = replaceUriHost(external_link, assets_url);
+                    auto new_external_link = replaceArchiveAssetUri(external_link, assets_url);
                     json["archive_url"] = new_external_link;
                 }
             }
             if (replay_type == 2) {
                 json.erase("video_url");
                 if (!external_fix_link.empty()) {
-                    auto new_external_fix_link = replaceUriHost(external_fix_link, assets_url);
+                    auto new_external_fix_link = replaceArchiveAssetUri(external_fix_link, assets_url);
                     json["archive_url"] = new_external_fix_link;
                 }
             }
