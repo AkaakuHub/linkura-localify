@@ -4,30 +4,27 @@
 #include <re2/re2.h>
 #include <fstream>
 #include <filesystem>
-#include <iterator>
 #include <mutex>
 #include <string_view>
 #include <unordered_set>
 
+extern jclass g_linkuraHookMainClass;
+
 namespace LinkuraLocal::HookShare {
+    static std::string GetSelfhostApiBaseUrl();
+
     namespace {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
-        std::mutex homeDetailWallpaperMutex;
+        std::mutex homeWallpaperMutex;
+        std::string homeWallpaperAuthorization;
         std::string homeDetailWallpaperSettingInfo;
-        bool homeDetailWallpaperLoaded = false;
-        std::mutex homeSimpleWallpaperMutex;
         std::string homeSimpleWallpaperSettingInfo;
-        bool homeSimpleWallpaperLoaded = false;
+        bool homeWallpaperLoaded = false;
 
-        static std::filesystem::path GetHomeDetailWallpaperPath() {
-            return Local::GetBasePath() / "home-detail-wallpaper.json";
-        }
-
-        static std::filesystem::path GetHomeSimpleWallpaperPath() {
-            return Local::GetBasePath() / "home-simple-wallpaper.json";
-        }
+        static std::string LowercaseAscii(std::string value);
+        nlohmann::json ObjectToJsonOrString(void* value);
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
             auto json = nlohmann::json::parse(value, nullptr, false);
@@ -52,56 +49,52 @@ namespace LinkuraLocal::HookShare {
                 && json["IsMovie"].is_boolean();
         }
 
-        static void SaveHomeDetailWallpaperSettingInfo(const std::string& value) {
-            if (!IsHomeDetailWallpaperSettingInfo(value)) return;
-
-            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
-            homeDetailWallpaperLoaded = true;
-            homeDetailWallpaperSettingInfo = value;
-
-            std::error_code error;
-            std::filesystem::create_directories(GetHomeDetailWallpaperPath().parent_path(), error);
-            std::ofstream file(GetHomeDetailWallpaperPath(), std::ios::binary | std::ios::trunc);
-            if (!file) {
-                Log::Warn("[HomeCustom] failed to save home detail wallpaper");
-                return;
-            }
-            file << value;
+        static std::string JsonStringField(const nlohmann::json& value, const char* key) {
+            if (!value.is_object()) return {};
+            const auto item = value.find(key);
+            if (item == value.end() || !item->is_string()) return {};
+            return item->get<std::string>();
         }
 
-        static void SaveHomeSimpleWallpaperSettingInfo(const std::string& value) {
-            if (!IsHomeSimpleWallpaperSettingInfo(value)) return;
-
-            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
-            homeSimpleWallpaperLoaded = true;
-            homeSimpleWallpaperSettingInfo = value;
-
-            std::error_code error;
-            std::filesystem::create_directories(GetHomeSimpleWallpaperPath().parent_path(), error);
-            std::ofstream file(GetHomeSimpleWallpaperPath(), std::ios::binary | std::ios::trunc);
-            if (!file) {
-                Log::Warn("[HomeCustom] failed to save home simple wallpaper");
-                return;
+        static std::string FindAuthorizationHeader(const nlohmann::json& value) {
+            if (value.is_object()) {
+                for (const auto& item : value.items()) {
+                    if (LowercaseAscii(item.key()) == "authorization" && item.value().is_string()) {
+                        return item.value().get<std::string>();
+                    }
+                }
+                auto name = JsonStringField(value, "name");
+                if (name.empty()) name = JsonStringField(value, "Name");
+                if (LowercaseAscii(name) == "authorization") {
+                    auto headerValue = JsonStringField(value, "value");
+                    if (headerValue.empty()) headerValue = JsonStringField(value, "Value");
+                    if (!headerValue.empty()) return headerValue;
+                }
+                for (const auto& item : value.items()) {
+                    const auto found = FindAuthorizationHeader(item.value());
+                    if (!found.empty()) return found;
+                }
             }
-            file << value;
+            if (value.is_array()) {
+                for (const auto& item : value) {
+                    const auto found = FindAuthorizationHeader(item);
+                    if (!found.empty()) return found;
+                }
+            }
+            return {};
         }
 
-        static void ClearHomeDetailWallpaperSettingInfo() {
-            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
-            homeDetailWallpaperLoaded = true;
+        static void RememberHomeWallpaperAuthorization(void* headerParams) {
+            const auto authorization = FindAuthorizationHeader(ObjectToJsonOrString(headerParams));
+            if (authorization.empty()) return;
+
+            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+            if (authorization == homeWallpaperAuthorization) return;
+
+            homeWallpaperAuthorization = authorization;
+            homeWallpaperLoaded = false;
             homeDetailWallpaperSettingInfo.clear();
-
-            std::error_code error;
-            std::filesystem::remove(GetHomeDetailWallpaperPath(), error);
-        }
-
-        static void ClearHomeSimpleWallpaperSettingInfo() {
-            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
-            homeSimpleWallpaperLoaded = true;
             homeSimpleWallpaperSettingInfo.clear();
-
-            std::error_code error;
-            std::filesystem::remove(GetHomeSimpleWallpaperPath(), error);
         }
 
         static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
@@ -110,55 +103,143 @@ namespace LinkuraLocal::HookShare {
             auto json = nlohmann::json::parse(body, nullptr, false);
             if (json.is_discarded() || !json.is_object()) return;
 
+            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
             if (json.value("is_view_detail_wallpaper", false)) {
                 const auto detail = json.value("wallpaper_detail_setting_info", std::string{});
                 if (IsHomeDetailWallpaperSettingInfo(detail)) {
-                    SaveHomeDetailWallpaperSettingInfo(detail);
-                    ClearHomeSimpleWallpaperSettingInfo();
+                    homeDetailWallpaperSettingInfo = detail;
+                    homeSimpleWallpaperSettingInfo.clear();
+                    homeWallpaperLoaded = true;
                 }
                 return;
             }
 
             const auto simple = json.value("wallpaper_simple_setting_info", std::string{});
             if (IsHomeSimpleWallpaperSettingInfo(simple)) {
-                SaveHomeSimpleWallpaperSettingInfo(simple);
-                ClearHomeDetailWallpaperSettingInfo();
+                homeSimpleWallpaperSettingInfo = simple;
+                homeDetailWallpaperSettingInfo.clear();
+                homeWallpaperLoaded = true;
             }
         }
 
-        static std::string GetHomeDetailWallpaperSettingInfo() {
-            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
-            if (!homeDetailWallpaperLoaded) {
-                homeDetailWallpaperLoaded = true;
-                std::ifstream file(GetHomeDetailWallpaperPath(), std::ios::binary);
-                if (file) {
-                    homeDetailWallpaperSettingInfo.assign(
-                        std::istreambuf_iterator<char>(file),
-                        std::istreambuf_iterator<char>()
-                    );
-                    if (!IsHomeDetailWallpaperSettingInfo(homeDetailWallpaperSettingInfo)) {
-                        homeDetailWallpaperSettingInfo.clear();
-                    }
+        static nlohmann::json FetchHomeWallpaperSettingEnvelope(const std::string& authorization) {
+            const auto baseUrl = GetSelfhostApiBaseUrl();
+            if (baseUrl.empty()) return nlohmann::json::object();
+
+            auto env = Misc::GetJNIEnv();
+            if (!env || !g_linkuraHookMainClass) return nlohmann::json::object();
+
+            auto methodId = env->GetStaticMethodID(
+                g_linkuraHookMainClass,
+                "fetchSelfhostApiWithHeaders",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
+            );
+            if (!methodId) {
+                env->ExceptionClear();
+                Log::Error("[HomeCustom] failed to resolve fetchSelfhostApiWithHeaders");
+                return nlohmann::json::object();
+            }
+
+            auto headers = nlohmann::json::object({{"authorization", authorization}});
+            auto jBaseUrl = env->NewStringUTF(baseUrl.c_str());
+            auto jApiPath = env->NewStringUTF("/v1/home/get_wallpaper_setting");
+            auto jRequestBodyJson = env->NewStringUTF("{}");
+            auto jHeadersJson = env->NewStringUTF(headers.dump().c_str());
+            auto result = static_cast<jstring>(env->CallStaticObjectMethod(
+                g_linkuraHookMainClass,
+                methodId,
+                jBaseUrl,
+                jApiPath,
+                jRequestBodyJson,
+                jHeadersJson
+            ));
+
+            std::string envelopeText;
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                Log::Error("[HomeCustom] get_wallpaper_setting request failed");
+            } else if (result) {
+                const char* chars = env->GetStringUTFChars(result, nullptr);
+                if (chars) {
+                    envelopeText = chars;
+                    env->ReleaseStringUTFChars(result, chars);
                 }
             }
+
+            if (result) env->DeleteLocalRef(result);
+            env->DeleteLocalRef(jHeadersJson);
+            env->DeleteLocalRef(jRequestBodyJson);
+            env->DeleteLocalRef(jApiPath);
+            env->DeleteLocalRef(jBaseUrl);
+
+            auto envelope = nlohmann::json::parse(envelopeText, nullptr, false);
+            return envelope.is_object() ? envelope : nlohmann::json::object();
+        }
+
+        static void LoadHomeWallpaperSettingFromApiIfNeeded() {
+            std::string authorization;
+            {
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                if (homeWallpaperLoaded) return;
+                authorization = homeWallpaperAuthorization;
+            }
+            if (authorization.empty()) return;
+
+            const auto envelope = FetchHomeWallpaperSettingEnvelope(authorization);
+            auto body = nlohmann::json::parse(envelope.value("body", std::string{}), nullptr, false);
+            if (body.is_discarded() || !body.is_object()) {
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                homeWallpaperLoaded = true;
+                return;
+            }
+
+            const auto currentSettingId = body.value("current_home_wall_paper_settings_id", std::string{});
+            const auto settingList = body.find("wall_paper_setting_list");
+            if (settingList == body.end() || !settingList->is_array()) {
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                homeWallpaperLoaded = true;
+                return;
+            }
+
+            for (const auto& setting : *settingList) {
+                if (!setting.is_object()) continue;
+                if (setting.value("d_home_wall_paper_settings_id", std::string{}) != currentSettingId) continue;
+
+                const auto settingInfo = nlohmann::json::parse(
+                    setting.value("wallpaper_setting_info", std::string{}),
+                    nullptr,
+                    false
+                );
+                if (settingInfo.is_discarded() || !settingInfo.is_object()) break;
+
+                const auto detail = settingInfo.value("wallpaper_detail_setting_info", std::string{});
+                const auto simple = settingInfo.value("wallpaper_simple_setting_info", std::string{});
+                const bool isViewDetailWallpaper = settingInfo.value("is_view_detail_wallpaper", false);
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                homeWallpaperLoaded = true;
+                homeDetailWallpaperSettingInfo =
+                    isViewDetailWallpaper && IsHomeDetailWallpaperSettingInfo(detail) ? detail : std::string{};
+                homeSimpleWallpaperSettingInfo =
+                    !isViewDetailWallpaper && IsHomeSimpleWallpaperSettingInfo(simple) ? simple : std::string{};
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+            homeWallpaperLoaded = true;
+            homeDetailWallpaperSettingInfo.clear();
+            homeSimpleWallpaperSettingInfo.clear();
+        }
+
+        static std::string GetHomeDetailWallpaperSettingInfo() {
+            LoadHomeWallpaperSettingFromApiIfNeeded();
+            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
             return homeDetailWallpaperSettingInfo;
         }
 
         static std::string GetHomeSimpleWallpaperSettingInfo() {
-            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
-            if (!homeSimpleWallpaperLoaded) {
-                homeSimpleWallpaperLoaded = true;
-                std::ifstream file(GetHomeSimpleWallpaperPath(), std::ios::binary);
-                if (file) {
-                    homeSimpleWallpaperSettingInfo.assign(
-                        std::istreambuf_iterator<char>(file),
-                        std::istreambuf_iterator<char>()
-                    );
-                    if (!IsHomeSimpleWallpaperSettingInfo(homeSimpleWallpaperSettingInfo)) {
-                        homeSimpleWallpaperSettingInfo.clear();
-                    }
-                }
-            }
+            LoadHomeWallpaperSettingFromApiIfNeeded();
+            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
             return homeSimpleWallpaperSettingInfo;
         }
 
@@ -1392,6 +1473,7 @@ namespace LinkuraLocal::HookShare {
             {"request", strBody},
         };
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
+        RememberHomeWallpaperAuthorization(headerParams);
         RememberHomeWallpaperRequest(strPath, strBody);
 
         if (Config::enableOfflineApiMock && path) {

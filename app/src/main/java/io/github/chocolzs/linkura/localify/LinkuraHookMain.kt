@@ -1206,8 +1206,14 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
 
         @JvmStatic
         fun fetchSelfhostApi(baseUrl: String, apiPath: String, requestJson: String): String {
+            return fetchSelfhostApiWithHeaders(baseUrl, apiPath, requestJson, "{}")
+        }
+
+        @JvmStatic
+        fun fetchSelfhostApiWithHeaders(baseUrl: String, apiPath: String, requestJson: String, headersJson: String): String {
             val normalizedBase = baseUrl.trim().trimEnd('/')
             val normalizedPath = if (apiPath.startsWith("/")) apiPath else "/$apiPath"
+            val extraHeaders = JSONObject(headersJson.ifBlank { "{}" })
             val connection = (URL("$normalizedBase$normalizedPath").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 5000
@@ -1215,6 +1221,9 @@ class LinkuraHookMain : IXposedHookLoadPackage, IXposedHookZygoteInit  {
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 setRequestProperty("Accept", "application/json")
+                extraHeaders.keys().forEach { name ->
+                    setRequestProperty(name, extraHeaders.optString(name))
+                }
             }
             return try {
                 OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
