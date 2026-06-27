@@ -4,6 +4,7 @@
 #include <re2/re2.h>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <mutex>
 #include <string_view>
 #include <unordered_set>
@@ -13,6 +14,85 @@ namespace LinkuraLocal::HookShare {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
+        std::mutex homeDetailWallpaperMutex;
+        std::string homeDetailWallpaperSettingInfo;
+        bool homeDetailWallpaperLoaded = false;
+
+        static std::filesystem::path GetHomeDetailWallpaperPath() {
+            return Local::GetBasePath() / "home-detail-wallpaper.json";
+        }
+
+        static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
+            auto json = nlohmann::json::parse(value, nullptr, false);
+            return !json.is_discarded()
+                && json.is_object()
+                && json.value("A", -1) == 3
+                && json.contains("B")
+                && json["B"].is_array();
+        }
+
+        static void SaveHomeDetailWallpaperSettingInfo(const std::string& value) {
+            if (!IsHomeDetailWallpaperSettingInfo(value)) return;
+
+            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
+            homeDetailWallpaperLoaded = true;
+            homeDetailWallpaperSettingInfo = value;
+
+            std::error_code error;
+            std::filesystem::create_directories(GetHomeDetailWallpaperPath().parent_path(), error);
+            std::ofstream file(GetHomeDetailWallpaperPath(), std::ios::binary | std::ios::trunc);
+            if (!file) {
+                Log::Warn("[HomeCustom] failed to save home detail wallpaper");
+                return;
+            }
+            file << value;
+        }
+
+        static void ClearHomeDetailWallpaperSettingInfo() {
+            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
+            homeDetailWallpaperLoaded = true;
+            homeDetailWallpaperSettingInfo.clear();
+
+            std::error_code error;
+            std::filesystem::remove(GetHomeDetailWallpaperPath(), error);
+        }
+
+        static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
+            if (path != "/v1/home/notify_wallpaper_setting") return;
+
+            auto json = nlohmann::json::parse(body, nullptr, false);
+            if (json.is_discarded() || !json.is_object()) return;
+
+            if (json.value("is_view_detail_wallpaper", false)) {
+                const auto detail = json.value("wallpaper_detail_setting_info", std::string{});
+                if (IsHomeDetailWallpaperSettingInfo(detail)) {
+                    SaveHomeDetailWallpaperSettingInfo(detail);
+                } else {
+                    ClearHomeDetailWallpaperSettingInfo();
+                }
+                return;
+            }
+
+            ClearHomeDetailWallpaperSettingInfo();
+        }
+
+        static std::string GetHomeDetailWallpaperSettingInfo() {
+            std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
+            if (!homeDetailWallpaperLoaded) {
+                homeDetailWallpaperLoaded = true;
+                std::ifstream file(GetHomeDetailWallpaperPath(), std::ios::binary);
+                if (file) {
+                    homeDetailWallpaperSettingInfo.assign(
+                        std::istreambuf_iterator<char>(file),
+                        std::istreambuf_iterator<char>()
+                    );
+                    if (!IsHomeDetailWallpaperSettingInfo(homeDetailWallpaperSettingInfo)) {
+                        homeDetailWallpaperSettingInfo.clear();
+                    }
+                }
+            }
+            return homeDetailWallpaperSettingInfo;
+        }
 
         static bool IsRestSharpResponse(void* response) {
             if (!response) return false;
@@ -1244,6 +1324,7 @@ namespace LinkuraLocal::HookShare {
             {"request", strBody},
         };
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
+        RememberHomeWallpaperRequest(strPath, strBody);
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -1272,6 +1353,41 @@ namespace LinkuraLocal::HookShare {
                                           headerParams, formParams, fileParams, pathParams,
                                           contentType, cancellationToken, method_info);
     }
+
+    DEFINE_HOOK(void*, StickerCustomDataMng_GetSellectData, (void* self, int32_t type, void* method_info)) {
+        auto result = StickerCustomDataMng_GetSellectData_Orig(self, type, method_info);
+        if (type != 3) {
+            return result;
+        }
+
+        const auto settingInfo = GetHomeDetailWallpaperSettingInfo();
+        if (!IsHomeDetailWallpaperSettingInfo(settingInfo)) {
+            return result;
+        }
+
+        static auto convertMethod = Il2cppUtils::GetMethodIl2cpp(
+            "Assembly-CSharp.dll",
+            "Tecotec",
+            "StickerCustomDataMng",
+            "ConvertFromString",
+            1
+        );
+        if (!convertMethod || !convertMethod->methodPointer) {
+            return result;
+        }
+
+        using ConvertFromStringFn = void*(*)(Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+        auto converted = reinterpret_cast<ConvertFromStringFn>(convertMethod->methodPointer)(
+            Il2cppUtils::Il2CppString::New(settingInfo),
+            convertMethod
+        );
+        if (!converted) {
+            return result;
+        }
+
+        return converted;
+    }
+
     // http response modify
     DEFINE_HOOK(void* , ApiClient_Deserialize, (void* self, void* response, void* type, void* method_info)) {
         if (Config::enableOfflineApiMock) {
@@ -1665,6 +1781,11 @@ namespace LinkuraLocal::HookShare {
         // GetHttpAsyncAddr
         ADD_HOOK(ApiClient_CallApiAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "CallApiAsync"));
         ADD_HOOK(ApiClient_Deserialize, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "Deserialize"));
+        auto StickerCustomDataMng_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "StickerCustomDataMng");
+        if (StickerCustomDataMng_klass) {
+            auto getSellectDataMethod = Il2cppUtils::GetMethodIl2cpp(StickerCustomDataMng_klass, "GetSellectData", 1);
+            ADD_HOOK(StickerCustomDataMng_GetSellectData, getSellectDataMethod ? getSellectDataMethod->methodPointer : 0);
+        }
         auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
         if (ApiException_klass) {
             auto apiExceptionMethod = Il2cppUtils::GetMethodIl2cpp(ApiException_klass, ".ctor", 2);
