@@ -57,6 +57,15 @@ namespace LinkuraLocal::HookShare {
             return klass;
         }
 
+        static void* GetFanLevelRankingDataClass() {
+            static void* klass = Il2cppUtils::GetClassIl2cpp(
+                "Assembly-CSharp.dll",
+                "Tecotec",
+                "FanLevelDetailPopMemberRankingData"
+            );
+            return klass;
+        }
+
         static int32_t ReadFanLevelRankingMyRank(void* response) {
             static auto field = ResolveIl2CppField(
                 GetFanLevelRankingResponseClass(),
@@ -128,6 +137,24 @@ namespace LinkuraLocal::HookShare {
             if (itemPlayerId.empty() || itemPlayerId != rankingPlayerId) return itemData;
 
             return ranking;
+        }
+
+        static void WriteFanLevelRankingDataFields(void* data, void* response, void* userRanking) {
+            if (!data) return;
+            static auto responseField = ResolveIl2CppField(
+                GetFanLevelRankingDataClass(),
+                "<FanLevelRankingResponse>k__BackingField"
+            );
+            static auto userRankingField = ResolveIl2CppField(
+                GetFanLevelRankingDataClass(),
+                "<UserFanLevelRanking>k__BackingField"
+            );
+            if (responseField) {
+                Il2cppUtils::ClassSetFieldValue<void*>(data, responseField, response);
+            }
+            if (userRankingField) {
+                Il2cppUtils::ClassSetFieldValue<void*>(data, userRankingField, userRanking);
+            }
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -1685,6 +1712,7 @@ namespace LinkuraLocal::HookShare {
             correctedUserRanking,
             method_info
         );
+        WriteFanLevelRankingDataFields(self, fanLevelRankingResponse, correctedUserRanking);
     }
 
     DEFINE_HOOK(
