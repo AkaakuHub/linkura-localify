@@ -22,9 +22,113 @@ namespace LinkuraLocal::HookShare {
         std::string homeDetailWallpaperSettingInfo;
         std::string homeSimpleWallpaperSettingInfo;
         bool homeWallpaperLoaded = false;
+        void* latestFanLevelRankingResponse = nullptr;
 
         static std::string LowercaseAscii(std::string value);
         nlohmann::json ObjectToJsonOrString(void* value);
+
+        static Il2cppUtils::FieldInfo* ResolveIl2CppField(
+            void* klass,
+            const char* fieldName
+        ) {
+            if (!klass) return nullptr;
+            return UnityResolve::Invoke<Il2cppUtils::FieldInfo*>(
+                "il2cpp_class_get_field_from_name",
+                klass,
+                fieldName
+            );
+        }
+
+        static void* GetFanLevelRankingResponseClass() {
+            static void* klass = Il2cppUtils::GetClassIl2cpp(
+                "Assembly-CSharp.dll",
+                "Org.OpenAPITools.Model",
+                "ProfileGetFanLevelRankingResponse"
+            );
+            return klass;
+        }
+
+        static void* GetMemberFanLevelRankingClass() {
+            static void* klass = Il2cppUtils::GetClassIl2cpp(
+                "Assembly-CSharp.dll",
+                "Org.OpenAPITools.Model",
+                "MemberFanLevelRanking"
+            );
+            return klass;
+        }
+
+        static int32_t ReadFanLevelRankingMyRank(void* response) {
+            static auto field = ResolveIl2CppField(
+                GetFanLevelRankingResponseClass(),
+                "<MyRank>k__BackingField"
+            );
+            if (!response || !field) return 0;
+            return Il2cppUtils::ClassGetFieldValue<int32_t>(response, field);
+        }
+
+        static void* ReadFanLevelRankingList(void* response) {
+            static auto field = ResolveIl2CppField(
+                GetFanLevelRankingResponseClass(),
+                "<Rankings>k__BackingField"
+            );
+            if (!response || !field) return nullptr;
+            return Il2cppUtils::ClassGetFieldValue<void*>(response, field);
+        }
+
+        static int32_t ReadMemberFanLevelRankingRank(void* ranking) {
+            static auto field = ResolveIl2CppField(
+                GetMemberFanLevelRankingClass(),
+                "<Rank>k__BackingField"
+            );
+            if (!ranking || !field) return 0;
+            return Il2cppUtils::ClassGetFieldValue<int32_t>(ranking, field);
+        }
+
+        static std::string ReadMemberFanLevelRankingPlayerId(void* ranking) {
+            static auto field = ResolveIl2CppField(
+                GetMemberFanLevelRankingClass(),
+                "<PlayerId>k__BackingField"
+            );
+            if (!ranking || !field) return {};
+            auto playerId = Il2cppUtils::ClassGetFieldValue<Il2cppUtils::Il2CppString*>(ranking, field);
+            return playerId ? playerId->ToString() : std::string{};
+        }
+
+        static void* GetFanLevelRankingAt(void* response, int32_t rank) {
+            if (rank <= 0 || rank > 100) return nullptr;
+
+            auto rankingList = ReadFanLevelRankingList(response);
+            if (!rankingList) return nullptr;
+
+            auto list = reinterpret_cast<UnityResolve::UnityType::List<void*>*>(rankingList);
+            const auto index = rank - 1;
+            if (!list->pList || index < 0 || index >= list->size) return nullptr;
+
+            return list->pList->At(static_cast<unsigned>(index));
+        }
+
+        static void* CorrectFanLevelUserRanking(void* response, void* userRanking) {
+            const auto rank = ReadFanLevelRankingMyRank(response);
+            auto ranking = GetFanLevelRankingAt(response, rank);
+            if (!ranking) return userRanking;
+
+            latestFanLevelRankingResponse = response;
+            return ranking;
+        }
+
+        static void* CorrectFanLevelRankingCellItem(void* itemData) {
+            if (!latestFanLevelRankingResponse || !itemData) return itemData;
+
+            const auto rank = ReadMemberFanLevelRankingRank(itemData);
+            auto ranking = GetFanLevelRankingAt(latestFanLevelRankingResponse, rank);
+            if (!ranking) return itemData;
+
+            const auto itemPlayerId = ReadMemberFanLevelRankingPlayerId(itemData);
+            const auto rankingPlayerId = ReadMemberFanLevelRankingPlayerId(ranking);
+            if (itemPlayerId.empty() || itemPlayerId != rankingPlayerId) return itemData;
+
+            return ranking;
+        }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
             auto json = nlohmann::json::parse(value, nullptr, false);
@@ -1569,6 +1673,29 @@ namespace LinkuraLocal::HookShare {
         *reinterpret_cast<void**>(static_cast<char*>(self) + 0x10) = converted;
     }
 
+    DEFINE_HOOK(
+        void,
+        FanLevelDetailPopMemberRankingData_ctor,
+        (void* self, void* fanLevelRankingResponse, void* userFanLevelRanking, void* method_info)
+    ) {
+        auto correctedUserRanking = CorrectFanLevelUserRanking(fanLevelRankingResponse, userFanLevelRanking);
+        FanLevelDetailPopMemberRankingData_ctor_Orig(
+            self,
+            fanLevelRankingResponse,
+            correctedUserRanking,
+            method_info
+        );
+    }
+
+    DEFINE_HOOK(
+        void,
+        FanLevelDetailPopMemberRankingCell_UpdateContent,
+        (void* self, void* itemData, void* method_info)
+    ) {
+        auto correctedItemData = CorrectFanLevelRankingCellItem(itemData);
+        FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
+    }
+
     // http response modify
     DEFINE_HOOK(void* , ApiClient_Deserialize, (void* self, void* response, void* type, void* method_info)) {
         if (Config::enableOfflineApiMock) {
@@ -1971,6 +2098,16 @@ namespace LinkuraLocal::HookShare {
         if (HomeCustomSimpleDataEvent_klass) {
             auto initializeMethod = Il2cppUtils::GetMethodIl2cpp(HomeCustomSimpleDataEvent_klass, "Initialize", 0);
             ADD_HOOK(HomeCustomSimpleDataEvent_Initialize, initializeMethod ? initializeMethod->methodPointer : 0);
+        }
+        auto FanLevelDetailPopMemberRankingData_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "FanLevelDetailPopMemberRankingData");
+        if (FanLevelDetailPopMemberRankingData_klass) {
+            auto ctorMethod = Il2cppUtils::GetMethodIl2cpp(FanLevelDetailPopMemberRankingData_klass, ".ctor", 2);
+            ADD_HOOK(FanLevelDetailPopMemberRankingData_ctor, ctorMethod ? ctorMethod->methodPointer : 0);
+        }
+        auto FanLevelDetailPopMemberRankingCell_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "FanLevelDetailPopMemberRankingCell");
+        if (FanLevelDetailPopMemberRankingCell_klass) {
+            auto updateContentMethod = Il2cppUtils::GetMethodIl2cpp(FanLevelDetailPopMemberRankingCell_klass, "UpdateContent", 1);
+            ADD_HOOK(FanLevelDetailPopMemberRankingCell_UpdateContent, updateContentMethod ? updateContentMethod->methodPointer : 0);
         }
         auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
         if (ApiException_klass) {
