@@ -17,9 +17,16 @@ namespace LinkuraLocal::HookShare {
         std::mutex homeDetailWallpaperMutex;
         std::string homeDetailWallpaperSettingInfo;
         bool homeDetailWallpaperLoaded = false;
+        std::mutex homeSimpleWallpaperMutex;
+        std::string homeSimpleWallpaperSettingInfo;
+        bool homeSimpleWallpaperLoaded = false;
 
         static std::filesystem::path GetHomeDetailWallpaperPath() {
             return Local::GetBasePath() / "home-detail-wallpaper.json";
+        }
+
+        static std::filesystem::path GetHomeSimpleWallpaperPath() {
+            return Local::GetBasePath() / "home-simple-wallpaper.json";
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -29,6 +36,20 @@ namespace LinkuraLocal::HookShare {
                 && json.value("A", -1) == 3
                 && json.contains("B")
                 && json["B"].is_array();
+        }
+
+        static bool IsHomeSimpleWallpaperSettingInfo(const std::string& value) {
+            auto json = nlohmann::json::parse(value, nullptr, false);
+            return !json.is_discarded()
+                && json.is_object()
+                && json.contains("IsDisp")
+                && json["IsDisp"].is_boolean()
+                && json.contains("_Type")
+                && json["_Type"].is_number_integer()
+                && json.contains("CardFileId")
+                && json["CardFileId"].is_number_integer()
+                && json.contains("IsMovie")
+                && json["IsMovie"].is_boolean();
         }
 
         static void SaveHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -48,6 +69,23 @@ namespace LinkuraLocal::HookShare {
             file << value;
         }
 
+        static void SaveHomeSimpleWallpaperSettingInfo(const std::string& value) {
+            if (!IsHomeSimpleWallpaperSettingInfo(value)) return;
+
+            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
+            homeSimpleWallpaperLoaded = true;
+            homeSimpleWallpaperSettingInfo = value;
+
+            std::error_code error;
+            std::filesystem::create_directories(GetHomeSimpleWallpaperPath().parent_path(), error);
+            std::ofstream file(GetHomeSimpleWallpaperPath(), std::ios::binary | std::ios::trunc);
+            if (!file) {
+                Log::Warn("[HomeCustom] failed to save home simple wallpaper");
+                return;
+            }
+            file << value;
+        }
+
         static void ClearHomeDetailWallpaperSettingInfo() {
             std::lock_guard<std::mutex> lock(homeDetailWallpaperMutex);
             homeDetailWallpaperLoaded = true;
@@ -55,6 +93,15 @@ namespace LinkuraLocal::HookShare {
 
             std::error_code error;
             std::filesystem::remove(GetHomeDetailWallpaperPath(), error);
+        }
+
+        static void ClearHomeSimpleWallpaperSettingInfo() {
+            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
+            homeSimpleWallpaperLoaded = true;
+            homeSimpleWallpaperSettingInfo.clear();
+
+            std::error_code error;
+            std::filesystem::remove(GetHomeSimpleWallpaperPath(), error);
         }
 
         static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
@@ -67,13 +114,16 @@ namespace LinkuraLocal::HookShare {
                 const auto detail = json.value("wallpaper_detail_setting_info", std::string{});
                 if (IsHomeDetailWallpaperSettingInfo(detail)) {
                     SaveHomeDetailWallpaperSettingInfo(detail);
-                } else {
-                    ClearHomeDetailWallpaperSettingInfo();
+                    ClearHomeSimpleWallpaperSettingInfo();
                 }
                 return;
             }
 
-            ClearHomeDetailWallpaperSettingInfo();
+            const auto simple = json.value("wallpaper_simple_setting_info", std::string{});
+            if (IsHomeSimpleWallpaperSettingInfo(simple)) {
+                SaveHomeSimpleWallpaperSettingInfo(simple);
+                ClearHomeDetailWallpaperSettingInfo();
+            }
         }
 
         static std::string GetHomeDetailWallpaperSettingInfo() {
@@ -92,6 +142,24 @@ namespace LinkuraLocal::HookShare {
                 }
             }
             return homeDetailWallpaperSettingInfo;
+        }
+
+        static std::string GetHomeSimpleWallpaperSettingInfo() {
+            std::lock_guard<std::mutex> lock(homeSimpleWallpaperMutex);
+            if (!homeSimpleWallpaperLoaded) {
+                homeSimpleWallpaperLoaded = true;
+                std::ifstream file(GetHomeSimpleWallpaperPath(), std::ios::binary);
+                if (file) {
+                    homeSimpleWallpaperSettingInfo.assign(
+                        std::istreambuf_iterator<char>(file),
+                        std::istreambuf_iterator<char>()
+                    );
+                    if (!IsHomeSimpleWallpaperSettingInfo(homeSimpleWallpaperSettingInfo)) {
+                        homeSimpleWallpaperSettingInfo.clear();
+                    }
+                }
+            }
+            return homeSimpleWallpaperSettingInfo;
         }
 
         static bool IsRestSharpResponse(void* response) {
@@ -1388,6 +1456,37 @@ namespace LinkuraLocal::HookShare {
         return converted;
     }
 
+    DEFINE_HOOK(void, HomeCustomSimpleDataEvent_Initialize, (void* self, void* method_info)) {
+        HomeCustomSimpleDataEvent_Initialize_Orig(self, method_info);
+
+        const auto settingInfo = GetHomeSimpleWallpaperSettingInfo();
+        if (!IsHomeSimpleWallpaperSettingInfo(settingInfo)) {
+            return;
+        }
+
+        static auto convertMethod = Il2cppUtils::GetMethodIl2cpp(
+            "Assembly-CSharp.dll",
+            "Tecotec",
+            "HomeCustomSimpleDataEvent",
+            "ConvertFromString",
+            1
+        );
+        if (!convertMethod || !convertMethod->methodPointer) {
+            return;
+        }
+
+        using ConvertFromStringFn = void*(*)(Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+        auto converted = reinterpret_cast<ConvertFromStringFn>(convertMethod->methodPointer)(
+            Il2cppUtils::Il2CppString::New(settingInfo),
+            convertMethod
+        );
+        if (!converted) {
+            return;
+        }
+
+        *reinterpret_cast<void**>(static_cast<char*>(self) + 0x10) = converted;
+    }
+
     // http response modify
     DEFINE_HOOK(void* , ApiClient_Deserialize, (void* self, void* response, void* type, void* method_info)) {
         if (Config::enableOfflineApiMock) {
@@ -1785,6 +1884,11 @@ namespace LinkuraLocal::HookShare {
         if (StickerCustomDataMng_klass) {
             auto getSellectDataMethod = Il2cppUtils::GetMethodIl2cpp(StickerCustomDataMng_klass, "GetSellectData", 1);
             ADD_HOOK(StickerCustomDataMng_GetSellectData, getSellectDataMethod ? getSellectDataMethod->methodPointer : 0);
+        }
+        auto HomeCustomSimpleDataEvent_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "HomeCustomSimpleDataEvent");
+        if (HomeCustomSimpleDataEvent_klass) {
+            auto initializeMethod = Il2cppUtils::GetMethodIl2cpp(HomeCustomSimpleDataEvent_klass, "Initialize", 0);
+            ADD_HOOK(HomeCustomSimpleDataEvent_Initialize, initializeMethod ? initializeMethod->methodPointer : 0);
         }
         auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
         if (ApiException_klass) {
