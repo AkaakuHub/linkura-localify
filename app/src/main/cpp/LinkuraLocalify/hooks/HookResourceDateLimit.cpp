@@ -156,6 +156,51 @@ namespace LinkuraLocal::HookResourceDateLimit {
         return record;
     }
 
+    DEFINE_HOOK(
+        bool,
+        MusicSelectFooter_EventLockValuePredicate,
+        (void* self, bool eventLocked, void* method)
+    ) {
+        if (Config::disableResourceDateLimit) {
+            return false;
+        }
+        return MusicSelectFooter_EventLockValuePredicate_Orig(self, eventLocked, method);
+    }
+
+    DEFINE_HOOK(
+        bool,
+        MusicSelectFooter_LiveGrandPrixOpenPredicate,
+        (void* self, void* record, void* method)
+    ) {
+        if (Config::disableResourceDateLimit) {
+            return record != nullptr;
+        }
+        return MusicSelectFooter_LiveGrandPrixOpenPredicate_Orig(self, record, method);
+    }
+
+    DEFINE_HOOK(
+        bool,
+        MusicSelectFooter_OnClickEventButtonAsObservableValue,
+        (void* self, void* unit, void* method)
+    ) {
+        if (Config::disableResourceDateLimit) {
+            return false;
+        }
+        return MusicSelectFooter_OnClickEventButtonAsObservableValue_Orig(self, unit, method);
+    }
+
+    DEFINE_HOOK(
+        void,
+        MusicSelectSceneController_EventButtonSubscriber,
+        (void* self, bool eventLocked, void* method)
+    ) {
+        MusicSelectSceneController_EventButtonSubscriber_Orig(
+            self,
+            Config::disableResourceDateLimit ? false : eventLocked,
+            method
+        );
+    }
+
     void Install(HookInstaller* hookInstaller) {
         ADD_HOOK(
             GachaSeriesRecord_get_StartTime,
@@ -180,6 +225,57 @@ namespace LinkuraLocal::HookResourceDateLimit {
         ADD_HOOK(
             GrandPrixMaster_Fetch,
             Il2cppUtils::GetMethodPointer("Core.dll", "Silverflame.SFL", "GrandPrixMaster", "Fetch")
+        );
+
+        auto musicSelectFooterKlass = Il2cppUtils::GetClassIl2cpp(
+            "Assembly-CSharp.dll",
+            "RhythmGame.MusicSelect",
+            "MusicSelectFooter"
+        );
+        auto musicSelectFooterHelperKlass = Il2cppUtils::find_nested_class_from_name(
+            musicSelectFooterKlass,
+            "<>c"
+        );
+        auto musicSelectSceneControllerKlass = Il2cppUtils::GetClassIl2cpp(
+            "Assembly-CSharp.dll",
+            "RhythmGame.MusicSelect",
+            "MusicSelectSceneController"
+        );
+        auto eventLockValuePredicate = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectFooterHelperKlass,
+            "<SetEventLock>b__10_0",
+            1
+        );
+        auto liveGrandPrixOpenPredicate = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectFooterHelperKlass,
+            "<SetEventLock>b__10_1",
+            1
+        );
+        auto onClickEventButtonAsObservableValue = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectFooterKlass,
+            "<OnClickEventButtonAsObservable>b__6_0",
+            1
+        );
+        auto eventButtonSubscriber = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectSceneControllerKlass,
+            "<ConnectReactiveStreams>b__13_9",
+            1
+        );
+        ADD_HOOK(
+            MusicSelectFooter_EventLockValuePredicate,
+            eventLockValuePredicate ? eventLockValuePredicate->methodPointer : 0
+        );
+        ADD_HOOK(
+            MusicSelectFooter_LiveGrandPrixOpenPredicate,
+            liveGrandPrixOpenPredicate ? liveGrandPrixOpenPredicate->methodPointer : 0
+        );
+        ADD_HOOK(
+            MusicSelectFooter_OnClickEventButtonAsObservableValue,
+            onClickEventButtonAsObservableValue ? onClickEventButtonAsObservableValue->methodPointer : 0
+        );
+        ADD_HOOK(
+            MusicSelectSceneController_EventButtonSubscriber,
+            eventButtonSubscriber ? eventButtonSubscriber->methodPointer : 0
         );
     }
 }
