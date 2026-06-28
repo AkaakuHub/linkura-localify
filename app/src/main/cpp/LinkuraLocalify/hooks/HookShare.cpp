@@ -149,6 +149,18 @@ namespace LinkuraLocal::HookShare {
                 GetFanLevelRankingDataClass(),
                 "<UserFanLevelRanking>k__BackingField"
             );
+            const auto userRank = ReadMemberFanLevelRankingRank(userRanking);
+            const auto userPlayerId = ReadMemberFanLevelRankingPlayerId(userRanking);
+            Log::InfoFmt(
+                "[FanLevelRanking] write data=%p response=%p user=%p userRank=%d userPlayerId=%s responseField=%p userField=%p",
+                data,
+                response,
+                userRanking,
+                userRank,
+                userPlayerId.c_str(),
+                responseField,
+                userRankingField
+            );
             if (responseField) {
                 Il2cppUtils::ClassSetFieldValue<void*>(data, responseField, response);
             }
@@ -1706,6 +1718,15 @@ namespace LinkuraLocal::HookShare {
         (void* self, void* fanLevelRankingResponse, void* userFanLevelRanking, void* method_info)
     ) {
         auto correctedUserRanking = CorrectFanLevelUserRanking(fanLevelRankingResponse, userFanLevelRanking);
+        Log::InfoFmt(
+            "[FanLevelRanking] ctor response=%p originalUser=%p correctedUser=%p myRank=%d correctedRank=%d correctedPlayerId=%s",
+            fanLevelRankingResponse,
+            userFanLevelRanking,
+            correctedUserRanking,
+            ReadFanLevelRankingMyRank(fanLevelRankingResponse),
+            ReadMemberFanLevelRankingRank(correctedUserRanking),
+            ReadMemberFanLevelRankingPlayerId(correctedUserRanking).c_str()
+        );
         FanLevelDetailPopMemberRankingData_ctor_Orig(
             self,
             fanLevelRankingResponse,
@@ -1721,6 +1742,15 @@ namespace LinkuraLocal::HookShare {
         (void* self, void* itemData, void* method_info)
     ) {
         auto correctedItemData = CorrectFanLevelRankingCellItem(itemData);
+        if (correctedItemData != itemData) {
+            Log::InfoFmt(
+                "[FanLevelRanking] cell replace item=%p corrected=%p rank=%d playerId=%s",
+                itemData,
+                correctedItemData,
+                ReadMemberFanLevelRankingRank(correctedItemData),
+                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
+            );
+        }
         FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
     }
 
