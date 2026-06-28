@@ -209,21 +209,17 @@ namespace LinkuraLocal::HookShare {
 
         static void SetTmpText(void* tmpText, const std::string& value) {
             if (!tmpText) return;
-            static auto setTextMethod = Il2cppUtils::GetMethodIl2cpp(
+            static auto tmpTextClass = Il2cppUtils::GetClass(
                 "Unity.TextMeshPro.dll",
                 "TMPro",
-                "TMP_Text",
-                "set_text",
-                1
+                "TMP_Text"
             );
+            static auto setTextMethod = tmpTextClass
+                ? tmpTextClass->Get<UnityResolve::Method>("set_text")
+                : nullptr;
             if (!setTextMethod) return;
 
-            using SetTextFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
-            reinterpret_cast<SetTextFn>(setTextMethod->methodPointer)(
-                tmpText,
-                Il2cppUtils::Il2CppString::New(value),
-                setTextMethod
-            );
+            setTextMethod->Invoke<void>(tmpText, Il2cppUtils::Il2CppString::New(value));
         }
 
         static void UpdateProfileCustomPreset(void* profileCustomPreset, const std::string& profileIconPartsInfo) {
@@ -265,6 +261,16 @@ namespace LinkuraLocal::HookShare {
             auto memberLevelText = Il2cppUtils::ClassGetFieldValue<void*>(cell, memberLevelTextField);
             auto profileCustomPreset = Il2cppUtils::ClassGetFieldValue<void*>(cell, profileCustomPresetField);
 
+            Log::InfoFmt(
+                "[FanLevelRanking] apply display cell=%p nameText=%p levelText=%p profileCustomPreset=%p name=%s level=%lld iconLen=%zu",
+                cell,
+                playerNameText,
+                memberLevelText,
+                profileCustomPreset,
+                ReadMemberFanLevelRankingPlayerName(itemData).c_str(),
+                static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(itemData)),
+                ReadMemberFanLevelRankingProfileIconPartsInfo(itemData).size()
+            );
             SetTmpText(playerNameText, ReadMemberFanLevelRankingPlayerName(itemData));
             SetTmpText(memberLevelText, std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData)));
             UpdateProfileCustomPreset(
