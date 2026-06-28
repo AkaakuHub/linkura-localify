@@ -353,10 +353,9 @@ namespace LinkuraLocal::HookShare {
         }
 
         static bool IsFanLevelUserRankingCellItem(void* itemData) {
-            if (!latestFanLevelUserRanking || !itemData) return false;
+            if (!latestFanLevelRankingResponse || !itemData) return false;
 
-            return ReadMemberFanLevelRankingRank(latestFanLevelUserRanking) == ReadMemberFanLevelRankingRank(itemData)
-                && ReadMemberFanLevelRankingPlayerId(latestFanLevelUserRanking) == ReadMemberFanLevelRankingPlayerId(itemData);
+            return ReadFanLevelRankingMyRank(latestFanLevelRankingResponse) == ReadMemberFanLevelRankingRank(itemData);
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
