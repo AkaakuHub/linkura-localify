@@ -1,8 +1,10 @@
 #include "../HookMain.h"
+#include "../http-mock/HttpMock.hpp"
 #include <unordered_map>
 
 namespace LinkuraLocal::HookResourceDateLimit {
     namespace {
+        constexpr auto QuestTopPath = "/v1/out_quest_live/get_quest_top";
         constexpr int64_t AlwaysOpenStartDateTime = 621355968000000000LL;
         constexpr int64_t AlwaysOpenEndDateTime = 3155378975999999999LL;
 
@@ -21,6 +23,11 @@ namespace LinkuraLocal::HookResourceDateLimit {
         std::unordered_map<void*, DateRange> patchedDateRecords;
         DateFieldAccess gachaSeriesDateFields{"GachaSeriesRecord", nullptr, nullptr, false};
         DateFieldAccess grandPrixDateFields{"GrandPrixRecord", nullptr, nullptr, false};
+        Il2cppUtils::FieldInfo* grandPrixIdField = nullptr;
+        bool loggedMissingGrandPrixIdField = false;
+        bool loggedActiveGrandPrixIdError = false;
+        bool activeGrandPrixIdLoaded = false;
+        int32_t activeGrandPrixId = 0;
         using OpenMusicSelectEventListPopupAsync = void* (*)(void*, void*);
         OpenMusicSelectEventListPopupAsync openMusicSelectEventListPopupAsync = nullptr;
         Il2cppUtils::MethodInfo* openMusicSelectEventListPopupAsyncMethod = nullptr;
@@ -84,6 +91,81 @@ namespace LinkuraLocal::HookResourceDateLimit {
                 Il2cppUtils::ClassSetFieldValue<int64_t>(record, endTimeField, patchedRecord->second.endTime);
             }
             patchedDateRecords.erase(patchedRecord);
+        }
+
+        Il2cppUtils::FieldInfo* GetGrandPrixIdField(void* record) {
+            if (!grandPrixIdField && record) {
+                grandPrixIdField = Il2cppUtils::il2cpp_class_get_field_from_name(
+                    Il2cppUtils::get_class_from_instance(record),
+                    "<Id>k__BackingField"
+                );
+            }
+            if (!grandPrixIdField && !loggedMissingGrandPrixIdField) {
+                Log::Error("GrandPrixRecord id field was not found");
+                loggedMissingGrandPrixIdField = true;
+            }
+            return grandPrixIdField;
+        }
+
+        int32_t GetGrandPrixRecordId(void* record) {
+            auto field = GetGrandPrixIdField(record);
+            if (!record || !field) {
+                return 0;
+            }
+            return Il2cppUtils::ClassGetFieldValue<int32_t>(record, field);
+        }
+
+        void LoadActiveGrandPrixId() {
+            if (activeGrandPrixIdLoaded) {
+                return;
+            }
+            activeGrandPrixIdLoaded = true;
+            activeGrandPrixId = 0;
+
+            if (Config::apiMockBaseUrl.empty()) {
+                if (!loggedActiveGrandPrixIdError) {
+                    Log::Error("apiMockBaseUrl is empty while resolving active grand prix id");
+                    loggedActiveGrandPrixIdError = true;
+                }
+                return;
+            }
+
+            const auto body = HttpMock::FetchSelfhostApiBody(
+                Config::apiMockBaseUrl,
+                QuestTopPath,
+                "{}"
+            );
+            const auto response = nlohmann::json::parse(body, nullptr, false);
+            if (
+                !response.is_object() ||
+                !response.contains("grand_prix_id") ||
+                !response["grand_prix_id"].is_number_integer()
+            ) {
+                if (!loggedActiveGrandPrixIdError) {
+                    Log::ErrorFmt("Failed to resolve active grand prix id from %s", QuestTopPath);
+                    loggedActiveGrandPrixIdError = true;
+                }
+                return;
+            }
+
+            activeGrandPrixId = response["grand_prix_id"].get<int32_t>();
+            Log::InfoFmt("Resolved active grand prix id: %d", activeGrandPrixId);
+        }
+
+        void RefreshActiveGrandPrixId() {
+            activeGrandPrixIdLoaded = false;
+            LoadActiveGrandPrixId();
+        }
+
+        bool IsActiveGrandPrixRecord(void* record) {
+            if (!record) {
+                return false;
+            }
+            LoadActiveGrandPrixId();
+            if (activeGrandPrixId <= 0) {
+                return false;
+            }
+            return GetGrandPrixRecordId(record) == activeGrandPrixId;
         }
     }
 
@@ -198,6 +280,7 @@ namespace LinkuraLocal::HookResourceDateLimit {
         (void* self, bool eventLocked, void* method)
     ) {
         if (Config::disableResourceDateLimit && openMusicSelectEventListPopupAsync && openMusicSelectEventListPopupAsyncMethod) {
+            RefreshActiveGrandPrixId();
             openMusicSelectEventListPopupAsync(self, openMusicSelectEventListPopupAsyncMethod);
             return;
         }
@@ -214,7 +297,7 @@ namespace LinkuraLocal::HookResourceDateLimit {
         (void* self, void* record, void* method)
     ) {
         if (Config::disableResourceDateLimit) {
-            return record != nullptr;
+            return IsActiveGrandPrixRecord(record);
         }
         return MusicSelectSceneController_EventListGrandPrixOpenPredicate_Orig(self, record, method);
     }
