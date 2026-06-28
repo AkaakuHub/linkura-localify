@@ -25,7 +25,6 @@ namespace LinkuraLocal::HookShare {
         std::string homeSimpleWallpaperSettingInfo;
         bool homeWallpaperLoaded = false;
         void* latestFanLevelRankingResponse = nullptr;
-        void* latestFanLevelUserRanking = nullptr;
         std::unordered_map<void*, std::string> fanLevelRankingProfileIconPartsInfoByPreset;
         thread_local bool isApplyingFanLevelRankingCell = false;
 
@@ -182,7 +181,6 @@ namespace LinkuraLocal::HookShare {
             if (!ranking) return userRanking;
 
             latestFanLevelRankingResponse = response;
-            latestFanLevelUserRanking = ranking;
             return ranking;
         }
 
@@ -211,18 +209,6 @@ namespace LinkuraLocal::HookShare {
             static auto userRankingField = ResolveIl2CppField(
                 GetFanLevelRankingDataClass(),
                 "<UserFanLevelRanking>k__BackingField"
-            );
-            const auto userRank = ReadMemberFanLevelRankingRank(userRanking);
-            const auto userPlayerId = ReadMemberFanLevelRankingPlayerId(userRanking);
-            Log::InfoFmt(
-                "[FanLevelRanking] write data=%p response=%p user=%p userRank=%d userPlayerId=%s responseField=%p userField=%p",
-                data,
-                response,
-                userRanking,
-                userRank,
-                userPlayerId.c_str(),
-                responseField,
-                userRankingField
             );
             if (responseField) {
                 Il2cppUtils::ClassSetFieldValue<void*>(data, responseField, response);
@@ -269,10 +255,6 @@ namespace LinkuraLocal::HookShare {
             );
             if (itemArray.size() == originalSize) return profileIconPartsInfo;
 
-            Log::InfoFmt(
-                "[FanLevelRanking] profile icon render json removed fan level frame count=%zu",
-                originalSize - itemArray.size()
-            );
             return parsed.dump();
         }
 
@@ -305,11 +287,6 @@ namespace LinkuraLocal::HookShare {
                 profileCustomPreset,
                 Il2cppUtils::Il2CppString::New(renderJson),
                 nullptr
-            );
-            Log::InfoFmt(
-                "[FanLevelRanking] profile icon update preset=%p iconLen=%zu",
-                profileCustomPreset,
-                profileIconPartsInfo.size()
             );
         }
 
@@ -398,16 +375,6 @@ namespace LinkuraLocal::HookShare {
             auto memberLevelText = Il2cppUtils::ClassGetFieldValue<void*>(cell, memberLevelTextField);
             auto profileCustomPreset = Il2cppUtils::ClassGetFieldValue<void*>(cell, profileCustomPresetField);
 
-            Log::InfoFmt(
-                "[FanLevelRanking] apply display cell=%p nameText=%p levelText=%p profileCustomPreset=%p name=%s level=%lld iconLen=%zu",
-                cell,
-                playerNameText,
-                memberLevelText,
-                profileCustomPreset,
-                ReadMemberFanLevelRankingPlayerName(itemData).c_str(),
-                static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(itemData)),
-                ReadMemberFanLevelRankingProfileIconPartsInfo(itemData).size()
-            );
             SetTmpText(playerNameText, ReadMemberFanLevelRankingPlayerName(itemData));
             SetTmpText(memberLevelText, std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData)));
             if (IsFanLevelUserRankingCellItem(itemData)) {
@@ -1976,15 +1943,6 @@ namespace LinkuraLocal::HookShare {
         (void* self, void* fanLevelRankingResponse, void* userFanLevelRanking, void* method_info)
     ) {
         auto correctedUserRanking = CorrectFanLevelUserRanking(fanLevelRankingResponse, userFanLevelRanking);
-        Log::InfoFmt(
-            "[FanLevelRanking] ctor response=%p originalUser=%p correctedUser=%p myRank=%d correctedRank=%d correctedPlayerId=%s",
-            fanLevelRankingResponse,
-            userFanLevelRanking,
-            correctedUserRanking,
-            ReadFanLevelRankingMyRank(fanLevelRankingResponse),
-            ReadMemberFanLevelRankingRank(correctedUserRanking),
-            ReadMemberFanLevelRankingPlayerId(correctedUserRanking).c_str()
-        );
         FanLevelDetailPopMemberRankingData_ctor_Orig(
             self,
             fanLevelRankingResponse,
@@ -2000,44 +1958,8 @@ namespace LinkuraLocal::HookShare {
         (void* self, void* itemData, void* method_info)
     ) {
         auto correctedItemData = CorrectFanLevelRankingCellItem(itemData);
-        const auto itemPlayerName = ReadMemberFanLevelRankingPlayerName(itemData);
-        const auto itemProfileIconPartsInfo = ReadMemberFanLevelRankingProfileIconPartsInfo(itemData);
-        const auto correctedPlayerName = ReadMemberFanLevelRankingPlayerName(correctedItemData);
-        const auto correctedProfileIconPartsInfo = ReadMemberFanLevelRankingProfileIconPartsInfo(correctedItemData);
-        Log::InfoFmt(
-            "[FanLevelRanking] cell update self=%p item=%p rank=%d playerId=%s name=%s level=%lld iconLen=%zu corrected=%p correctedRank=%d correctedPlayerId=%s correctedName=%s correctedLevel=%lld correctedIconLen=%zu",
-            self,
-            itemData,
-            ReadMemberFanLevelRankingRank(itemData),
-            ReadMemberFanLevelRankingPlayerId(itemData).c_str(),
-            itemPlayerName.c_str(),
-            static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(itemData)),
-            itemProfileIconPartsInfo.size(),
-            correctedItemData,
-            ReadMemberFanLevelRankingRank(correctedItemData),
-            ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str(),
-            correctedPlayerName.c_str(),
-            static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(correctedItemData)),
-            correctedProfileIconPartsInfo.size()
-        );
-        if (correctedItemData != itemData) {
-            Log::InfoFmt(
-                "[FanLevelRanking] cell replace item=%p corrected=%p rank=%d playerId=%s",
-                itemData,
-                correctedItemData,
-                ReadMemberFanLevelRankingRank(correctedItemData),
-                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
-            );
-        }
         if (IsFanLevelUserRankingCellItem(correctedItemData)) {
             ApplyFanLevelRankingCellDisplay(self, correctedItemData);
-            Log::InfoFmt(
-                "[FanLevelRanking] cell handled user ranking without original self=%p item=%p rank=%d playerId=%s",
-                self,
-                correctedItemData,
-                ReadMemberFanLevelRankingRank(correctedItemData),
-                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
-            );
             return;
         }
         {
@@ -2052,11 +1974,6 @@ namespace LinkuraLocal::HookShare {
         auto iconPartsInfo = fanLevelRankingProfileIconPartsInfoByPreset.find(self);
         if (iconPartsInfo == fanLevelRankingProfileIconPartsInfoByPreset.end()) return;
 
-        Log::InfoFmt(
-            "[FanLevelRanking] profile icon awake reapply preset=%p iconLen=%zu",
-            self,
-            iconPartsInfo->second.size()
-        );
         UpdateProfileCustomPreset(self, iconPartsInfo->second);
     }
 
