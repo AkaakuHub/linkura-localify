@@ -510,6 +510,7 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.enableMotionCaptureReplay = false
         config.enableInGameReplayDisplay = false
         config.unlockAfter = false
+        config.disableResourceDateLimit = false
         config.filterMotionCaptureReplay = false
         config.filterPlayableMotionCapture = false
         config.avoidAccidentalTouch = false
