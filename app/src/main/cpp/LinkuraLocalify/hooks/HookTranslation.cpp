@@ -78,14 +78,50 @@ namespace LinkuraLocal::HookTranslation {
 //        ForceMeshUpdate->Invoke<void>(TMP_Textself, false, false);
     }
 
+    bool IsFanLevelRankingProbeText(const std::string& text) {
+        return text == "newnew2"
+            || text == "nirei"
+            || text == "201"
+            || text == "999"
+            || text == "100"
+            || text.contains("名前は最大")
+            || text.contains("最大8文字")
+            || text.contains("最大８文字")
+            || text.contains("※1文字以上8文字以内")
+            || text.contains("※１文字以上８文字以内")
+            || (text.contains("名前") && text.contains("最大") && text.contains("文字"));
+    }
+
+    void LogFanLevelRankingProbeText(
+        const char* hookName,
+        void* self,
+        const std::string& text,
+        void* caller
+    ) {
+        if (!IsFanLevelRankingProbeText(text)) return;
+        Log::InfoFmt(
+            "[FanLevelRankingText] hook=%s self=%p caller=%p text=%s",
+            hookName,
+            self,
+            caller,
+            text.c_str()
+        );
+    }
+
     DEFINE_HOOK(void, TMP_Text_PopulateTextBackingArray, (void* self, UnityResolve::UnityType::String* text, int start, int length)) {
         if (!text) return TMP_Text_PopulateTextBackingArray_Orig(self, text, start, length);
         UpdateTMPFont(self);
-        if (!Config::enableLocale) return TMP_Text_PopulateTextBackingArray_Orig(self, text, start, length);
         static auto Substring = Il2cppUtils::GetMethod("mscorlib.dll", "System", "String", "Substring",
                                                        {"System.Int32", "System.Int32"});
 
         const std::string origText = Substring->Invoke<Il2cppString*>(text, start, length)->ToString();
+        LogFanLevelRankingProbeText(
+            "TMP_Text.PopulateTextBackingArray",
+            self,
+            origText,
+            __builtin_return_address(0)
+        );
+        if (!Config::enableLocale) return TMP_Text_PopulateTextBackingArray_Orig(self, text, start, length);
         std::string transText;
         if (Local::GetGenericText(origText, &transText)) {
             const auto newText = UnityResolve::UnityType::String::New(transText);
@@ -103,8 +139,14 @@ namespace LinkuraLocal::HookTranslation {
     DEFINE_HOOK(void, TMP_Text_SetText_2, (void* self, Il2cppString* sourceText, bool syncTextInputBox, void* mtd)) {
         if (!sourceText) return TMP_Text_SetText_2_Orig(self, sourceText, syncTextInputBox, mtd);
         UpdateTMPFont(self);
-        if (!Config::enableLocale) return TMP_Text_SetText_2_Orig(self, sourceText, syncTextInputBox, mtd);
         const std::string origText = sourceText->ToString();
+        LogFanLevelRankingProbeText(
+            "TMP_Text.SetText",
+            self,
+            origText,
+            __builtin_return_address(0)
+        );
+        if (!Config::enableLocale) return TMP_Text_SetText_2_Orig(self, sourceText, syncTextInputBox, mtd);
         std::string transText;
         if (Local::GetGenericText(origText, &transText)) {
             const auto newText = UnityResolve::UnityType::String::New(transText);
@@ -122,34 +164,30 @@ namespace LinkuraLocal::HookTranslation {
     DEFINE_HOOK(void, TMP_Text_set_text, (void* self, Il2cppString* sourceText, void* mtd)) {
         if (!sourceText) return TMP_Text_set_text_Orig(self, sourceText, mtd);
         const auto text = sourceText->ToString();
-        if (
-            text.contains("名前")
-            || text == "newnew2"
-            || text == "nirei"
-            || text == "201"
-            || text == "999"
-        ) {
-            Log::InfoFmt(
-                "[FanLevelRankingText] set_text self=%p caller=%p text=%s",
-                self,
-                __builtin_return_address(0),
-                text.c_str()
-            );
-        }
+        LogFanLevelRankingProbeText(
+            "TMP_Text.set_text",
+            self,
+            text,
+            __builtin_return_address(0)
+        );
         TMP_Text_set_text_Orig(self, sourceText, mtd);
     }
 
     DEFINE_HOOK(void, TextMeshProUGUI_Awake, (void* self, void* method)) {
-        // Log::InfoFmt("TextMeshProUGUI_Awake at %p, self at %p", TextMeshProUGUI_Awake_Orig, self);
         UpdateTMPFont(self);
-        if (!Config::enableLocale) return TextMeshProUGUI_Awake_Orig(self, method);
         const auto TMP_Text_klass = Il2cppUtils::GetClass("Unity.TextMeshPro.dll",
                                                           "TMPro", "TMP_Text");
         const auto get_Text_method = TMP_Text_klass->Get<UnityResolve::Method>("get_text");
         const auto set_Text_method = TMP_Text_klass->Get<UnityResolve::Method>("set_text");
         const auto currText = get_Text_method->Invoke<UnityResolve::UnityType::String*>(self);
         if (currText) {
-            //Log::InfoFmt("TextMeshProUGUI_Awake: %s", currText->ToString().c_str());
+            LogFanLevelRankingProbeText(
+                "TextMeshProUGUI.Awake",
+                self,
+                currText->ToString(),
+                __builtin_return_address(0)
+            );
+            if (!Config::enableLocale) return TextMeshProUGUI_Awake_Orig(self, method);
             std::string transText;
             if (Local::GetGenericText(currText->ToString(), &transText)) {
                 set_Text_method->Invoke<void>(self, UnityResolve::UnityType::String::New(transText));
@@ -164,8 +202,10 @@ namespace LinkuraLocal::HookTranslation {
                 set_Text_method->Invoke<void>(self, UnityResolve::UnityType::String::New(currText->ToString()));
             }
         }
+        else if (!Config::enableLocale) {
+            return TextMeshProUGUI_Awake_Orig(self, method);
+        }
 
-        // set_font->Invoke<void>(self, font);
         TextMeshProUGUI_Awake_Orig(self, method);
     }
 
