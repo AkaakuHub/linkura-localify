@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 extern jclass g_linkuraHookMainClass;
@@ -24,6 +25,7 @@ namespace LinkuraLocal::HookShare {
         bool homeWallpaperLoaded = false;
         void* latestFanLevelRankingResponse = nullptr;
         void* latestFanLevelUserRanking = nullptr;
+        std::unordered_map<void*, std::string> fanLevelRankingProfileIconPartsInfoByPreset;
 
         static std::string LowercaseAscii(std::string value);
         nlohmann::json ObjectToJsonOrString(void* value);
@@ -235,6 +237,11 @@ namespace LinkuraLocal::HookShare {
 
         static void UpdateProfileCustomPreset(void* profileCustomPreset, const std::string& profileIconPartsInfo) {
             if (!profileCustomPreset || profileIconPartsInfo.empty()) return;
+            fanLevelRankingProfileIconPartsInfoByPreset[profileCustomPreset] = profileIconPartsInfo;
+            if (fanLevelRankingProfileIconPartsInfoByPreset.size() > 128) {
+                fanLevelRankingProfileIconPartsInfoByPreset.clear();
+                fanLevelRankingProfileIconPartsInfoByPreset[profileCustomPreset] = profileIconPartsInfo;
+            }
             static auto updateDispMethod = Il2cppUtils::GetMethodIl2cpp(
                 "Assembly-CSharp.dll",
                 "Tecotec",
@@ -249,6 +256,11 @@ namespace LinkuraLocal::HookShare {
                 profileCustomPreset,
                 Il2cppUtils::Il2CppString::New(profileIconPartsInfo),
                 updateDispMethod
+            );
+            Log::InfoFmt(
+                "[FanLevelRanking] profile icon update preset=%p iconLen=%zu",
+                profileCustomPreset,
+                profileIconPartsInfo.size()
             );
         }
 
@@ -1983,6 +1995,19 @@ namespace LinkuraLocal::HookShare {
         ApplyFanLevelRankingCellDisplay(self, correctedItemData);
     }
 
+    DEFINE_HOOK(void, ProfileCustomPreset_Awake, (void* self, void* method_info)) {
+        ProfileCustomPreset_Awake_Orig(self, method_info);
+        auto iconPartsInfo = fanLevelRankingProfileIconPartsInfoByPreset.find(self);
+        if (iconPartsInfo == fanLevelRankingProfileIconPartsInfoByPreset.end()) return;
+
+        Log::InfoFmt(
+            "[FanLevelRanking] profile icon awake reapply preset=%p iconLen=%zu",
+            self,
+            iconPartsInfo->second.size()
+        );
+        UpdateProfileCustomPreset(self, iconPartsInfo->second);
+    }
+
     // http response modify
     DEFINE_HOOK(void* , ApiClient_Deserialize, (void* self, void* response, void* type, void* method_info)) {
         if (Config::enableOfflineApiMock) {
@@ -2395,6 +2420,11 @@ namespace LinkuraLocal::HookShare {
         if (FanLevelDetailPopMemberRankingCell_klass) {
             auto updateContentMethod = Il2cppUtils::GetMethodIl2cpp(FanLevelDetailPopMemberRankingCell_klass, "UpdateContent", 1);
             ADD_HOOK(FanLevelDetailPopMemberRankingCell_UpdateContent, updateContentMethod ? updateContentMethod->methodPointer : 0);
+        }
+        auto ProfileCustomPreset_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "ProfileCustomPreset");
+        if (ProfileCustomPreset_klass) {
+            auto awakeMethod = Il2cppUtils::GetMethodIl2cpp(ProfileCustomPreset_klass, "Awake", 0);
+            ADD_HOOK(ProfileCustomPreset_Awake, awakeMethod ? awakeMethod->methodPointer : 0);
         }
         auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
         if (ApiException_klass) {
