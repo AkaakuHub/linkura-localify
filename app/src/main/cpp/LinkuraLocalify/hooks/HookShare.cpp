@@ -23,6 +23,7 @@ namespace LinkuraLocal::HookShare {
         std::string homeSimpleWallpaperSettingInfo;
         bool homeWallpaperLoaded = false;
         void* latestFanLevelRankingResponse = nullptr;
+        void* latestFanLevelUserRanking = nullptr;
 
         static std::string LowercaseAscii(std::string value);
         nlohmann::json ObjectToJsonOrString(void* value);
@@ -167,6 +168,7 @@ namespace LinkuraLocal::HookShare {
             if (!ranking) return userRanking;
 
             latestFanLevelRankingResponse = response;
+            latestFanLevelUserRanking = ranking;
             return ranking;
         }
 
@@ -351,14 +353,10 @@ namespace LinkuraLocal::HookShare {
         }
 
         static bool IsFanLevelUserRankingCellItem(void* itemData) {
-            if (!latestFanLevelRankingResponse || !itemData) return false;
+            if (!latestFanLevelUserRanking || !itemData) return false;
 
-            const auto myRank = ReadFanLevelRankingMyRank(latestFanLevelRankingResponse);
-            if (myRank <= 0 || myRank != ReadMemberFanLevelRankingRank(itemData)) return false;
-
-            auto userRanking = GetFanLevelRankingAt(latestFanLevelRankingResponse, myRank);
-            return userRanking
-                && ReadMemberFanLevelRankingPlayerId(userRanking) == ReadMemberFanLevelRankingPlayerId(itemData);
+            return ReadMemberFanLevelRankingRank(latestFanLevelUserRanking) == ReadMemberFanLevelRankingRank(itemData)
+                && ReadMemberFanLevelRankingPlayerId(latestFanLevelUserRanking) == ReadMemberFanLevelRankingPlayerId(itemData);
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
