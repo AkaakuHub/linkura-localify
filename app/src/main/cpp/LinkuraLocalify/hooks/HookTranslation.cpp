@@ -119,6 +119,26 @@ namespace LinkuraLocal::HookTranslation {
         }
     }
 
+    DEFINE_HOOK(void, TMP_Text_set_text, (void* self, Il2cppString* sourceText, void* mtd)) {
+        if (!sourceText) return TMP_Text_set_text_Orig(self, sourceText, mtd);
+        const auto text = sourceText->ToString();
+        if (
+            text.contains("名前")
+            || text == "newnew2"
+            || text == "nirei"
+            || text == "201"
+            || text == "999"
+        ) {
+            Log::InfoFmt(
+                "[FanLevelRankingText] set_text self=%p caller=%p text=%s",
+                self,
+                __builtin_return_address(0),
+                text.c_str()
+            );
+        }
+        TMP_Text_set_text_Orig(self, sourceText, mtd);
+    }
+
     DEFINE_HOOK(void, TextMeshProUGUI_Awake, (void* self, void* method)) {
         // Log::InfoFmt("TextMeshProUGUI_Awake at %p, self at %p", TextMeshProUGUI_Awake_Orig, self);
         UpdateTMPFont(self);
@@ -203,6 +223,8 @@ namespace LinkuraLocal::HookTranslation {
         ADD_HOOK(TMP_Text_SetText_2, Il2cppUtils::GetMethodPointer("Unity.TextMeshPro.dll", "TMPro",
                                                                    "TMP_Text", "SetText",
                                                                    { "System.String", "System.Boolean" }));
+        ADD_HOOK(TMP_Text_set_text, Il2cppUtils::GetMethodPointer("Unity.TextMeshPro.dll", "TMPro",
+                                                                  "TMP_Text", "set_text"));
 
         ADD_HOOK(TextField_set_value, Il2cppUtils::GetMethodPointer("UnityEngine.UIElementsModule.dll", "UnityEngine.UIElements",
                                                                     "TextField", "set_value"));
