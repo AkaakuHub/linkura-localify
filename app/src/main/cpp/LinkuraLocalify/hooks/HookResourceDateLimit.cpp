@@ -21,6 +21,9 @@ namespace LinkuraLocal::HookResourceDateLimit {
         std::unordered_map<void*, DateRange> patchedDateRecords;
         DateFieldAccess gachaSeriesDateFields{"GachaSeriesRecord", nullptr, nullptr, false};
         DateFieldAccess grandPrixDateFields{"GrandPrixRecord", nullptr, nullptr, false};
+        Il2cppUtils::FieldInfo* rhythmGameGrandPrixTopSeriesListField = nullptr;
+        Il2cppUtils::FieldInfo* rhythmGameGrandPrixSeriesIdField = nullptr;
+        bool loggedMissingGrandPrixTopFields = false;
         using OpenMusicSelectEventListPopupAsync = void* (*)(void*, void*);
         OpenMusicSelectEventListPopupAsync openMusicSelectEventListPopupAsync = nullptr;
         Il2cppUtils::MethodInfo* openMusicSelectEventListPopupAsyncMethod = nullptr;
@@ -85,6 +88,80 @@ namespace LinkuraLocal::HookResourceDateLimit {
             }
             patchedDateRecords.erase(patchedRecord);
         }
+
+        int32_t ResolveGrandPrixIdFromTopResponse(void* response) {
+            if (!response) {
+                return 0;
+            }
+
+            if (!rhythmGameGrandPrixTopSeriesListField) {
+                rhythmGameGrandPrixTopSeriesListField = Il2cppUtils::il2cpp_class_get_field_from_name(
+                    Il2cppUtils::get_class_from_instance(response),
+                    "<SeriesList>k__BackingField"
+                );
+            }
+            if (!rhythmGameGrandPrixTopSeriesListField) {
+                if (!loggedMissingGrandPrixTopFields) {
+                    Log::Error("RhythmGameGrandPrixTopResponse.SeriesList field was not found");
+                    loggedMissingGrandPrixTopFields = true;
+                }
+                return 0;
+            }
+
+            auto seriesListObject = Il2cppUtils::ClassGetFieldValue<void*>(
+                response,
+                rhythmGameGrandPrixTopSeriesListField
+            );
+            auto seriesList = reinterpret_cast<UnityResolve::UnityType::List<void*>*>(seriesListObject);
+            if (!seriesList || !seriesList->pList || seriesList->size <= 0) {
+                return 0;
+            }
+
+            auto firstSeries = seriesList->pList->At(0);
+            if (!firstSeries) {
+                return 0;
+            }
+
+            if (!rhythmGameGrandPrixSeriesIdField) {
+                rhythmGameGrandPrixSeriesIdField = Il2cppUtils::il2cpp_class_get_field_from_name(
+                    Il2cppUtils::get_class_from_instance(firstSeries),
+                    "<GrandPrixRhythmGameSeriesId>k__BackingField"
+                );
+            }
+            if (!rhythmGameGrandPrixSeriesIdField) {
+                if (!loggedMissingGrandPrixTopFields) {
+                    Log::Error("RhythmGameGrandPrixSeries.GrandPrixRhythmGameSeriesId field was not found");
+                    loggedMissingGrandPrixTopFields = true;
+                }
+                return 0;
+            }
+
+            const auto seriesId = Il2cppUtils::ClassGetFieldValue<int32_t>(
+                firstSeries,
+                rhythmGameGrandPrixSeriesIdField
+            );
+            return seriesId / 10;
+        }
+    }
+
+    DEFINE_HOOK(
+        void,
+        RhythmGameLiveGrandprixData_ctor,
+        (void* self, int32_t grandPrixId, void* response, void* method)
+    ) {
+        auto resolvedGrandPrixId = grandPrixId;
+        if (Config::disableResourceDateLimit) {
+            const auto responseGrandPrixId = ResolveGrandPrixIdFromTopResponse(response);
+            if (responseGrandPrixId > 0 && responseGrandPrixId != grandPrixId) {
+                Log::InfoFmt(
+                    "RhythmGameLiveGrandprixData grandPrixId replaced from response: request=%d response=%d",
+                    grandPrixId,
+                    responseGrandPrixId
+                );
+                resolvedGrandPrixId = responseGrandPrixId;
+            }
+        }
+        RhythmGameLiveGrandprixData_ctor_Orig(self, resolvedGrandPrixId, response, method);
     }
 
     DEFINE_HOOK(
@@ -234,6 +311,10 @@ namespace LinkuraLocal::HookResourceDateLimit {
     }
 
     void Install(HookInstaller* hookInstaller) {
+        ADD_HOOK(
+            RhythmGameLiveGrandprixData_ctor,
+            Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "RhythmGame", "RhythmGameLiveGrandprixData", ".ctor")
+        );
         ADD_HOOK(
             GachaSeriesRecord_get_StartTime,
             Il2cppUtils::GetMethodPointer("Core.dll", "Silverflame.SFL", "GachaSeriesRecord", "get_StartTime")
