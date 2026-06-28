@@ -66,6 +66,15 @@ namespace LinkuraLocal::HookShare {
             return klass;
         }
 
+        static void* GetFanLevelRankingCellClass() {
+            static void* klass = Il2cppUtils::GetClassIl2cpp(
+                "Assembly-CSharp.dll",
+                "Tecotec",
+                "FanLevelDetailPopMemberRankingCell"
+            );
+            return klass;
+        }
+
         static int32_t ReadFanLevelRankingMyRank(void* response) {
             static auto field = ResolveIl2CppField(
                 GetFanLevelRankingResponseClass(),
@@ -196,6 +205,72 @@ namespace LinkuraLocal::HookShare {
             if (userRankingField) {
                 Il2cppUtils::ClassSetFieldValue<void*>(data, userRankingField, userRanking);
             }
+        }
+
+        static void SetTmpText(void* tmpText, const std::string& value) {
+            if (!tmpText) return;
+            static auto setTextMethod = Il2cppUtils::GetMethodIl2cpp(
+                "Unity.TextMeshPro.dll",
+                "TMPro",
+                "TMP_Text",
+                "set_text",
+                1
+            );
+            if (!setTextMethod) return;
+
+            using SetTextFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+            reinterpret_cast<SetTextFn>(setTextMethod->methodPointer)(
+                tmpText,
+                Il2cppUtils::Il2CppString::New(value),
+                setTextMethod
+            );
+        }
+
+        static void UpdateProfileCustomPreset(void* profileCustomPreset, const std::string& profileIconPartsInfo) {
+            if (!profileCustomPreset || profileIconPartsInfo.empty()) return;
+            static auto updateDispMethod = Il2cppUtils::GetMethodIl2cpp(
+                "Assembly-CSharp.dll",
+                "Tecotec",
+                "ProfileCustomPreset",
+                "UpdateDisp",
+                1
+            );
+            if (!updateDispMethod) return;
+
+            using UpdateDispFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+            reinterpret_cast<UpdateDispFn>(updateDispMethod->methodPointer)(
+                profileCustomPreset,
+                Il2cppUtils::Il2CppString::New(profileIconPartsInfo),
+                updateDispMethod
+            );
+        }
+
+        static void ApplyFanLevelRankingCellDisplay(void* cell, void* itemData) {
+            if (!cell || !itemData) return;
+            static auto playerNameTextField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "playerNameText"
+            );
+            static auto memberLevelTextField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "memberLevelText"
+            );
+            static auto profileCustomPresetField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "profileCustomPreset"
+            );
+            if (!playerNameTextField || !memberLevelTextField || !profileCustomPresetField) return;
+
+            auto playerNameText = Il2cppUtils::ClassGetFieldValue<void*>(cell, playerNameTextField);
+            auto memberLevelText = Il2cppUtils::ClassGetFieldValue<void*>(cell, memberLevelTextField);
+            auto profileCustomPreset = Il2cppUtils::ClassGetFieldValue<void*>(cell, profileCustomPresetField);
+
+            SetTmpText(playerNameText, ReadMemberFanLevelRankingPlayerName(itemData));
+            SetTmpText(memberLevelText, std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData)));
+            UpdateProfileCustomPreset(
+                profileCustomPreset,
+                ReadMemberFanLevelRankingProfileIconPartsInfo(itemData)
+            );
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -1801,6 +1876,7 @@ namespace LinkuraLocal::HookShare {
             );
         }
         FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
+        ApplyFanLevelRankingCellDisplay(self, correctedItemData);
     }
 
     // http response modify
