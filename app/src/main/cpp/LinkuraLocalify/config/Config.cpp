@@ -63,6 +63,7 @@ namespace LinkuraLocal::Config {
     bool enableOfflineApiMock = false;
     std::string apiMockBaseUrl;
     std::string topUrlPrefix;
+    bool disableResourceDateLimit = false;
     
     // Archive configuration mapping: archives_id -> item data
     std::unordered_map<std::string, nlohmann::json> archiveConfigMap;
@@ -136,6 +137,7 @@ namespace LinkuraLocal::Config {
             GetConfigItem(enableOfflineApiMock);
             GetConfigItem(apiMockBaseUrl);
             GetConfigItem(topUrlPrefix);
+            GetConfigItem(disableResourceDateLimit);
             if (localeCode != "ja-JP") {
                 enableLocale = true;
             }
@@ -232,12 +234,14 @@ namespace LinkuraLocal::Config {
                 if (configUpdate.has_enable_offline_api_mock()) enableOfflineApiMock = configUpdate.enable_offline_api_mock();
                 if (configUpdate.has_api_mock_base_url()) apiMockBaseUrl = configUpdate.api_mock_base_url();
                 if (configUpdate.has_top_url_prefix()) topUrlPrefix = configUpdate.top_url_prefix();
-                Log::InfoFmt("Config hot-reload state: hasEnableOfflineApiMock=%d enableOfflineApiMock=%d apiMockBaseUrl=%s assetsUrlPrefix=%s topUrlPrefix=%s",
+                if (configUpdate.has_disable_resource_date_limit()) disableResourceDateLimit = configUpdate.disable_resource_date_limit();
+                Log::InfoFmt("Config hot-reload state: hasEnableOfflineApiMock=%d enableOfflineApiMock=%d apiMockBaseUrl=%s assetsUrlPrefix=%s topUrlPrefix=%s disableResourceDateLimit=%d",
                              configUpdate.has_enable_offline_api_mock() ? 1 : 0,
                              enableOfflineApiMock ? 1 : 0,
                              apiMockBaseUrl.c_str(),
                              assetsUrlPrefix.c_str(),
-                             topUrlPrefix.c_str());
+                             topUrlPrefix.c_str(),
+                             disableResourceDateLimit ? 1 : 0);
             }
         } catch (const std::exception& e) {
             Log::ErrorFmt("UpdateConfig error: %s", e.what());

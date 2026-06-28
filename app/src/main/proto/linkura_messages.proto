@@ -114,6 +114,7 @@ message ConfigUpdate {
   optional bool enable_offline_api_mock = 48;
   optional string api_mock_base_url = 51;
   optional string top_url_prefix = 52;
+  optional bool disable_resource_date_limit = 53;
   reserved 49, 50;
 }
 

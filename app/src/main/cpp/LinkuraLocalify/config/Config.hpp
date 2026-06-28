@@ -67,6 +67,7 @@ namespace LinkuraLocal::Config {
     extern bool enableOfflineApiMock;
     extern std::string apiMockBaseUrl;
     extern std::string topUrlPrefix;
+    extern bool disableResourceDateLimit;
 
     extern std::unordered_map<std::string, nlohmann::json> archiveConfigMap;
     extern VersionCompatibility::Version currentClientVersion;

@@ -70,6 +70,8 @@
     <string name="check_selfhost_connection">Check Selfhost Connection</string>
     <string name="selfhost_connection_checking">Checking Selfhost Connection...</string>
     <string name="enable_offline_api_mock">Use Selfhost API Server</string>
+    <string name="disable_resource_date_limit">Disable Resource Date Limits</string>
+    <string name="disable_resource_date_limit_description">Ignores date limits derived from resource master data. This does not rewrite resource files or resource versions.</string>
     <string name="local_mode_hint_collapsed">Tap the header to expand.</string>
     <string name="about_warn_title">WARNING</string>
     <string name="about_warn_p1">This plugin is for learning and communication only.</string>

@@ -84,6 +84,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         LinkuraLocalify/hooks/HookShare.cpp
         LinkuraLocalify/hooks/HookStory.cpp
         LinkuraLocalify/hooks/HookTranslation.cpp
+        LinkuraLocalify/hooks/HookResourceDateLimit.cpp
         # Generated protobuf files
         build/linkura_messages.pb.cc
         )

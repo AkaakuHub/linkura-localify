@@ -558,5 +558,7 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="check_selfhost_connection">セルフホスト疎通確認</string>
     <string name="selfhost_connection_checking">セルフホスト疎通確認中...</string>
     <string name="enable_offline_api_mock">セルフホストAPIサーバーを使う</string>
+    <string name="disable_resource_date_limit">リソース由来の日付制限を無効化</string>
+    <string name="disable_resource_date_limit_description">リソースmaster由来の日付制限を無視します。リソースファイルやリソースバージョンは書き換えません。</string>
     <string name="local_mode_hint_collapsed">タイトルをタップして展開します。</string>
 </resources>

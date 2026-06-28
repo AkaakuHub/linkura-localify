@@ -268,6 +268,22 @@ fun HomePage(modifier: Modifier = Modifier,
         item {
             GakuGroupBox(modifier = modifier, "Settings") {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    GakuSwitch(
+                        modifier,
+                        stringResource(R.string.disable_resource_date_limit),
+                        checked = config.value.disableResourceDateLimit
+                    ) { v ->
+                        context?.onDisableResourceDateLimitChanged(v)
+                    }
+                    Text(
+                        text = stringResource(R.string.disable_resource_date_limit_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                    )
                     GakuTextInput(
                         value = config.value.assetsUrlPrefix,
                         onValueChange = { value ->

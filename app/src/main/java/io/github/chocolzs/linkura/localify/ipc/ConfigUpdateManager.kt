@@ -76,11 +76,12 @@ class ConfigUpdateManager private constructor() {
                 if (config.enableOfflineApiMock != null) enableOfflineApiMock = config.enableOfflineApiMock
                 if (config.apiMockBaseUrl != null) apiMockBaseUrl = config.apiMockBaseUrl
                 if (config.topUrlPrefix != null) topUrlPrefix = config.topUrlPrefix
+                disableResourceDateLimit = config.disableResourceDateLimit
             }.build()
 
             Log.i(
                 TAG,
-                "Sending config update: enableOfflineApiMock=${config.enableOfflineApiMock}, apiMockBaseUrl=${config.apiMockBaseUrl}, assetsUrlPrefix=${config.assetsUrlPrefix}, topUrlPrefix=${config.topUrlPrefix}"
+                "Sending config update: enableOfflineApiMock=${config.enableOfflineApiMock}, apiMockBaseUrl=${config.apiMockBaseUrl}, assetsUrlPrefix=${config.assetsUrlPrefix}, topUrlPrefix=${config.topUrlPrefix}, disableResourceDateLimit=${config.disableResourceDateLimit}"
             )
             val service = serviceInstance
             if (service == null) {

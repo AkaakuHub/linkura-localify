@@ -103,3 +103,7 @@ namespace LinkuraLocal::HookTranslation {
     void Install(HookInstaller *hookInstaller);
     void ApplyFanLevelRankingPlaceholderText(void* playerNameText, void* memberLevelText, const std::string& playerName, const std::string& memberFanLevel);
 }
+
+namespace LinkuraLocal::HookResourceDateLimit {
+    void Install(HookInstaller* hookInstaller);
+}

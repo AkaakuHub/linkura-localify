@@ -70,6 +70,7 @@ interface ConfigListener {
     fun onCustomClientVersionChanged(value: String)
     fun onCustomResVersionChanged(value: String)
     fun onEnableOfflineApiMockChanged(value: Boolean)
+    fun onDisableResourceDateLimitChanged(value: Boolean)
     fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String)
     fun onApplySelfhostAssetCaptureMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String)
 
@@ -465,6 +466,12 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         sendConfigUpdate(config)
     }
 
+    override fun onDisableResourceDateLimitChanged(value: Boolean) {
+        config.disableResourceDateLimit = value
+        saveConfig()
+        sendConfigUpdate(config)
+    }
+
     override fun onApplySelfhostLocalMode(apiBaseUrl: String, assetBaseUrl: String, topBaseUrl: String) {
         val normalizedApiBaseUrl = apiBaseUrl.trim().trimEnd('/')
         val normalizedAssetBaseUrl = assetBaseUrl.trim().trimEnd('/')
@@ -480,6 +487,7 @@ interface ConfigUpdateListener: ConfigListener, IHasConfigItems {
         config.enableMotionCaptureReplay = true
         config.enableInGameReplayDisplay = true
         config.unlockAfter = true
+        config.disableResourceDateLimit = true
         config.filterMotionCaptureReplay = false
         config.filterPlayableMotionCapture = false
         config.avoidAccidentalTouch = false

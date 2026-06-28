@@ -80,6 +80,7 @@ namespace LinkuraLocal::HookMain {
         HookShare::Install(hookInstaller);
         HookStory::Install(hookInstaller);
         HookTranslation::Install(hookInstaller);
+        HookResourceDateLimit::Install(hookInstaller);
     }
     // 77 2640 5000
 
