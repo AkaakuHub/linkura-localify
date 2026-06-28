@@ -379,6 +379,8 @@ namespace LinkuraLocal::HookShare {
             SetTmpText(memberLevelText, std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData)));
             if (IsFanLevelUserRankingCellItem(itemData)) {
                 HookTranslation::ApplyFanLevelRankingPlaceholderText(
+                    playerNameText,
+                    memberLevelText,
                     ReadMemberFanLevelRankingPlayerName(itemData),
                     std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData))
                 );
