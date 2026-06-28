@@ -103,6 +103,35 @@ namespace LinkuraLocal::HookShare {
             return playerId ? playerId->ToString() : std::string{};
         }
 
+        static std::string ReadMemberFanLevelRankingPlayerName(void* ranking) {
+            static auto field = ResolveIl2CppField(
+                GetMemberFanLevelRankingClass(),
+                "<PlayerName>k__BackingField"
+            );
+            if (!ranking || !field) return {};
+            auto playerName = Il2cppUtils::ClassGetFieldValue<Il2cppUtils::Il2CppString*>(ranking, field);
+            return playerName ? playerName->ToString() : std::string{};
+        }
+
+        static std::string ReadMemberFanLevelRankingProfileIconPartsInfo(void* ranking) {
+            static auto field = ResolveIl2CppField(
+                GetMemberFanLevelRankingClass(),
+                "<ProfileIconPartsInfo>k__BackingField"
+            );
+            if (!ranking || !field) return {};
+            auto profileIconPartsInfo = Il2cppUtils::ClassGetFieldValue<Il2cppUtils::Il2CppString*>(ranking, field);
+            return profileIconPartsInfo ? profileIconPartsInfo->ToString() : std::string{};
+        }
+
+        static int64_t ReadMemberFanLevelRankingMemberFanLevel(void* ranking) {
+            static auto field = ResolveIl2CppField(
+                GetMemberFanLevelRankingClass(),
+                "<MemberFanLevel>k__BackingField"
+            );
+            if (!ranking || !field) return 0;
+            return Il2cppUtils::ClassGetFieldValue<int64_t>(ranking, field);
+        }
+
         static void* GetFanLevelRankingAt(void* response, int32_t rank) {
             if (rank <= 0 || rank > 100) return nullptr;
 
@@ -1742,6 +1771,26 @@ namespace LinkuraLocal::HookShare {
         (void* self, void* itemData, void* method_info)
     ) {
         auto correctedItemData = CorrectFanLevelRankingCellItem(itemData);
+        const auto itemPlayerName = ReadMemberFanLevelRankingPlayerName(itemData);
+        const auto itemProfileIconPartsInfo = ReadMemberFanLevelRankingProfileIconPartsInfo(itemData);
+        const auto correctedPlayerName = ReadMemberFanLevelRankingPlayerName(correctedItemData);
+        const auto correctedProfileIconPartsInfo = ReadMemberFanLevelRankingProfileIconPartsInfo(correctedItemData);
+        Log::InfoFmt(
+            "[FanLevelRanking] cell update self=%p item=%p rank=%d playerId=%s name=%s level=%lld iconLen=%zu corrected=%p correctedRank=%d correctedPlayerId=%s correctedName=%s correctedLevel=%lld correctedIconLen=%zu",
+            self,
+            itemData,
+            ReadMemberFanLevelRankingRank(itemData),
+            ReadMemberFanLevelRankingPlayerId(itemData).c_str(),
+            itemPlayerName.c_str(),
+            static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(itemData)),
+            itemProfileIconPartsInfo.size(),
+            correctedItemData,
+            ReadMemberFanLevelRankingRank(correctedItemData),
+            ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str(),
+            correctedPlayerName.c_str(),
+            static_cast<long long>(ReadMemberFanLevelRankingMemberFanLevel(correctedItemData)),
+            correctedProfileIconPartsInfo.size()
+        );
         if (correctedItemData != itemData) {
             Log::InfoFmt(
                 "[FanLevelRanking] cell replace item=%p corrected=%p rank=%d playerId=%s",
