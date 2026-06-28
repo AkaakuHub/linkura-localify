@@ -308,6 +308,8 @@ namespace LinkuraLocal::HookShare {
             );
         }
 
+        static bool IsFanLevelUserRankingCellItem(void* itemData);
+
         static void ApplyFanLevelRankingCellDisplay(void* cell, void* itemData) {
             if (!cell || !itemData) return;
             static auto playerNameTextField = ResolveIl2CppField(
@@ -345,6 +347,12 @@ namespace LinkuraLocal::HookShare {
             );
             SetTmpText(playerNameText, ReadMemberFanLevelRankingPlayerName(itemData));
             SetTmpText(memberLevelText, std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData)));
+            if (IsFanLevelUserRankingCellItem(itemData)) {
+                HookTranslation::ApplyFanLevelRankingPlaceholderText(
+                    ReadMemberFanLevelRankingPlayerName(itemData),
+                    std::to_string(ReadMemberFanLevelRankingMemberFanLevel(itemData))
+                );
+            }
             UpdateProfileCustomPreset(
                 profileCustomPreset,
                 ReadMemberFanLevelRankingProfileIconPartsInfo(itemData)

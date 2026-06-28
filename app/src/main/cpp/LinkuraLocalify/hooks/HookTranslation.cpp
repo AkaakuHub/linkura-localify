@@ -10,6 +10,11 @@ namespace LinkuraLocal::HookTranslation {
     using Il2cppString = UnityResolve::UnityType::String;
 
     void* fontCache = nullptr;
+    void* fanLevelRankingPlaceholderNameText = nullptr;
+    void* fanLevelRankingPlaceholderLevelText = nullptr;
+    std::string fanLevelRankingPlayerNameText;
+    std::string fanLevelRankingMemberLevelText;
+
     void* GetReplaceFont() {
         static auto fontName = Local::GetBasePath() / "local-files" / "gkamsZHFontMIX.otf";
         if (!std::filesystem::exists(fontName)) {
@@ -92,6 +97,43 @@ namespace LinkuraLocal::HookTranslation {
             || (text.contains("名前") && text.contains("最大") && text.contains("文字"));
     }
 
+    bool IsFanLevelRankingNamePlaceholderText(const std::string& text) {
+        return text.contains("名前は最大")
+            || text.contains("最大8文字")
+            || text.contains("最大８文字")
+            || (text.contains("名前") && text.contains("最大") && text.contains("文字"));
+    }
+
+    bool IsFanLevelRankingLevelPlaceholderText(const std::string& text) {
+        return text == "999";
+    }
+
+    std::string GetFanLevelRankingTextReplacement(const std::string& text) {
+        if (IsFanLevelRankingNamePlaceholderText(text) && !fanLevelRankingPlayerNameText.empty()) {
+            return fanLevelRankingPlayerNameText;
+        }
+        if (IsFanLevelRankingLevelPlaceholderText(text) && !fanLevelRankingMemberLevelText.empty()) {
+            return fanLevelRankingMemberLevelText;
+        }
+        return {};
+    }
+
+    void SetFanLevelRankingPlaceholderText(void* textObject, const std::string& value) {
+        if (!textObject || value.empty() || !Il2cppUtils::IsNativeObjectAlive(textObject)) return;
+
+        static auto tmpTextClass = Il2cppUtils::GetClass(
+            "Unity.TextMeshPro.dll",
+            "TMPro",
+            "TMP_Text"
+        );
+        static auto setTextMethod = tmpTextClass
+            ? tmpTextClass->Get<UnityResolve::Method>("set_text")
+            : nullptr;
+        if (!setTextMethod) return;
+
+        setTextMethod->Invoke<void>(textObject, Il2cppString::New(value));
+    }
+
     void LogFanLevelRankingProbeText(
         const char* hookName,
         void* self,
@@ -99,6 +141,14 @@ namespace LinkuraLocal::HookTranslation {
         void* caller
     ) {
         if (!IsFanLevelRankingProbeText(text)) return;
+        if (IsFanLevelRankingNamePlaceholderText(text)) {
+            fanLevelRankingPlaceholderNameText = self;
+            SetFanLevelRankingPlaceholderText(self, fanLevelRankingPlayerNameText);
+        }
+        if (IsFanLevelRankingLevelPlaceholderText(text)) {
+            fanLevelRankingPlaceholderLevelText = self;
+            SetFanLevelRankingPlaceholderText(self, fanLevelRankingMemberLevelText);
+        }
         Log::InfoFmt(
             "[FanLevelRankingText] hook=%s self=%p caller=%p text=%s",
             hookName,
@@ -106,6 +156,13 @@ namespace LinkuraLocal::HookTranslation {
             caller,
             text.c_str()
         );
+    }
+
+    void ApplyFanLevelRankingPlaceholderText(const std::string& playerName, const std::string& memberFanLevel) {
+        fanLevelRankingPlayerNameText = playerName;
+        fanLevelRankingMemberLevelText = memberFanLevel;
+        SetFanLevelRankingPlaceholderText(fanLevelRankingPlaceholderNameText, playerName);
+        SetFanLevelRankingPlaceholderText(fanLevelRankingPlaceholderLevelText, memberFanLevel);
     }
 
     DEFINE_HOOK(void, TMP_Text_PopulateTextBackingArray, (void* self, UnityResolve::UnityType::String* text, int start, int length)) {
@@ -121,6 +178,11 @@ namespace LinkuraLocal::HookTranslation {
             origText,
             __builtin_return_address(0)
         );
+        const auto replacementText = GetFanLevelRankingTextReplacement(origText);
+        if (!replacementText.empty()) {
+            const auto newText = UnityResolve::UnityType::String::New(replacementText);
+            return TMP_Text_PopulateTextBackingArray_Orig(self, newText, 0, newText->length);
+        }
         if (!Config::enableLocale) return TMP_Text_PopulateTextBackingArray_Orig(self, text, start, length);
         std::string transText;
         if (Local::GetGenericText(origText, &transText)) {
@@ -146,6 +208,10 @@ namespace LinkuraLocal::HookTranslation {
             origText,
             __builtin_return_address(0)
         );
+        const auto replacementText = GetFanLevelRankingTextReplacement(origText);
+        if (!replacementText.empty()) {
+            return TMP_Text_SetText_2_Orig(self, UnityResolve::UnityType::String::New(replacementText), syncTextInputBox, mtd);
+        }
         if (!Config::enableLocale) return TMP_Text_SetText_2_Orig(self, sourceText, syncTextInputBox, mtd);
         std::string transText;
         if (Local::GetGenericText(origText, &transText)) {
@@ -170,6 +236,10 @@ namespace LinkuraLocal::HookTranslation {
             text,
             __builtin_return_address(0)
         );
+        const auto replacementText = GetFanLevelRankingTextReplacement(text);
+        if (!replacementText.empty()) {
+            return TMP_Text_set_text_Orig(self, UnityResolve::UnityType::String::New(replacementText), mtd);
+        }
         TMP_Text_set_text_Orig(self, sourceText, mtd);
     }
 
@@ -187,6 +257,12 @@ namespace LinkuraLocal::HookTranslation {
                 currText->ToString(),
                 __builtin_return_address(0)
             );
+            const auto replacementText = GetFanLevelRankingTextReplacement(currText->ToString());
+            if (!replacementText.empty()) {
+                set_Text_method->Invoke<void>(self, UnityResolve::UnityType::String::New(replacementText));
+                TextMeshProUGUI_Awake_Orig(self, method);
+                return;
+            }
             if (!Config::enableLocale) return TextMeshProUGUI_Awake_Orig(self, method);
             std::string transText;
             if (Local::GetGenericText(currText->ToString(), &transText)) {

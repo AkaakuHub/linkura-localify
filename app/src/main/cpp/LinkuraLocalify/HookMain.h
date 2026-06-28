@@ -101,4 +101,5 @@ namespace LinkuraLocal::HookShare {
 }
 namespace LinkuraLocal::HookTranslation {
     void Install(HookInstaller *hookInstaller);
+    void ApplyFanLevelRankingPlaceholderText(const std::string& playerName, const std::string& memberFanLevel);
 }
