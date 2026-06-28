@@ -27,6 +27,17 @@ namespace LinkuraLocal::HookShare {
         void* latestFanLevelRankingResponse = nullptr;
         void* latestFanLevelUserRanking = nullptr;
         std::unordered_map<void*, std::string> fanLevelRankingProfileIconPartsInfoByPreset;
+        thread_local bool isApplyingFanLevelRankingCell = false;
+
+        struct ScopedFanLevelRankingCellUpdate {
+            ScopedFanLevelRankingCellUpdate() {
+                isApplyingFanLevelRankingCell = true;
+            }
+
+            ~ScopedFanLevelRankingCellUpdate() {
+                isApplyingFanLevelRankingCell = false;
+            }
+        };
 
         static std::string LowercaseAscii(std::string value);
         nlohmann::json ObjectToJsonOrString(void* value);
@@ -2029,7 +2040,10 @@ namespace LinkuraLocal::HookShare {
             );
             return;
         }
-        FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
+        {
+            ScopedFanLevelRankingCellUpdate scopedFanLevelRankingCellUpdate;
+            FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
+        }
         ApplyFanLevelRankingCellDisplay(self, correctedItemData);
     }
 
@@ -2044,6 +2058,23 @@ namespace LinkuraLocal::HookShare {
             iconPartsInfo->second.size()
         );
         UpdateProfileCustomPreset(self, iconPartsInfo->second);
+    }
+
+    DEFINE_HOOK(void, ProfileCustomPreset_UpdateDisp_string, (void* self, Il2cppUtils::Il2CppString* setDataJson, void* method_info)) {
+        if (!setDataJson) {
+            return ProfileCustomPreset_UpdateDisp_string_Orig(self, setDataJson, method_info);
+        }
+        const auto trackedIconPartsInfo = fanLevelRankingProfileIconPartsInfoByPreset.find(self);
+        if (!isApplyingFanLevelRankingCell && trackedIconPartsInfo == fanLevelRankingProfileIconPartsInfoByPreset.end()) {
+            return ProfileCustomPreset_UpdateDisp_string_Orig(self, setDataJson, method_info);
+        }
+
+        const auto renderJson = CreateFanLevelRankingIconRenderJson(setDataJson->ToString());
+        return ProfileCustomPreset_UpdateDisp_string_Orig(
+            self,
+            Il2cppUtils::Il2CppString::New(renderJson),
+            method_info
+        );
     }
 
     // http response modify
@@ -2463,6 +2494,16 @@ namespace LinkuraLocal::HookShare {
         if (ProfileCustomPreset_klass) {
             auto awakeMethod = Il2cppUtils::GetMethodIl2cpp(ProfileCustomPreset_klass, "Awake", 0);
             ADD_HOOK(ProfileCustomPreset_Awake, awakeMethod ? awakeMethod->methodPointer : 0);
+            ADD_HOOK(
+                ProfileCustomPreset_UpdateDisp_string,
+                Il2cppUtils::GetMethodPointer(
+                    "Assembly-CSharp.dll",
+                    "Tecotec",
+                    "ProfileCustomPreset",
+                    "UpdateDisp",
+                    {"System.String"}
+                )
+            );
         }
         auto ApiException_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiException");
         if (ApiException_klass) {
