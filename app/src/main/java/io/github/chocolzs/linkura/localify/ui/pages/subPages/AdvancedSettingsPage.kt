@@ -347,6 +347,26 @@ fun AdvanceSettingsPage(modifier: Modifier = Modifier,
         }
 
         item {
+            GakuGroupBox(modifier, stringResource(R.string.resource_date_limit_settings)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    GakuSwitch(
+                        modifier,
+                        stringResource(R.string.disable_resource_date_limit),
+                        checked = config.value.disableResourceDateLimit
+                    ) { v ->
+                        context?.onDisableResourceDateLimitChanged(v)
+                    }
+                    Text(
+                        text = stringResource(R.string.disable_resource_date_limit_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+
+        item {
             GakuGroupBox(
                 modifier, 
                 stringResource(R.string.camera_settings),
