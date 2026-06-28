@@ -21,6 +21,9 @@ namespace LinkuraLocal::HookResourceDateLimit {
         std::unordered_map<void*, DateRange> patchedDateRecords;
         DateFieldAccess gachaSeriesDateFields{"GachaSeriesRecord", nullptr, nullptr, false};
         DateFieldAccess grandPrixDateFields{"GrandPrixRecord", nullptr, nullptr, false};
+        using OpenMusicSelectEventListPopupAsync = void* (*)(void*, void*);
+        OpenMusicSelectEventListPopupAsync openMusicSelectEventListPopupAsync = nullptr;
+        Il2cppUtils::MethodInfo* openMusicSelectEventListPopupAsyncMethod = nullptr;
 
         Il2cppUtils::FieldInfo* GetStartTimeField(void* record, DateFieldAccess& fields) {
             if (!fields.startTimeField && record) {
@@ -194,6 +197,10 @@ namespace LinkuraLocal::HookResourceDateLimit {
         MusicSelectSceneController_EventButtonSubscriber,
         (void* self, bool eventLocked, void* method)
     ) {
+        if (Config::disableResourceDateLimit && openMusicSelectEventListPopupAsync && openMusicSelectEventListPopupAsyncMethod) {
+            openMusicSelectEventListPopupAsync(self, openMusicSelectEventListPopupAsyncMethod);
+            return;
+        }
         MusicSelectSceneController_EventButtonSubscriber_Orig(
             self,
             Config::disableResourceDateLimit ? false : eventLocked,
@@ -295,6 +302,16 @@ namespace LinkuraLocal::HookResourceDateLimit {
             "<ConnectReactiveStreams>b__13_9",
             1
         );
+        openMusicSelectEventListPopupAsyncMethod = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectSceneControllerKlass,
+            "OpenMusicSelectEventListPopupAsync",
+            0
+        );
+        openMusicSelectEventListPopupAsync = openMusicSelectEventListPopupAsyncMethod
+            ? reinterpret_cast<OpenMusicSelectEventListPopupAsync>(
+                  openMusicSelectEventListPopupAsyncMethod->methodPointer
+              )
+            : nullptr;
         auto eventListGrandPrixOpenPredicate = Il2cppUtils::GetMethodIl2cpp(
             musicSelectSceneControllerHelperKlass,
             "<OpenMusicSelectEventListPopupAsync>b__23_1",
