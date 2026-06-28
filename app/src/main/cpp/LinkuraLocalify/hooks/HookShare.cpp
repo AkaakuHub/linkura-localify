@@ -4,6 +4,7 @@
 #include <re2/re2.h>
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
@@ -235,6 +236,35 @@ namespace LinkuraLocal::HookShare {
             setTextMethod->Invoke<void>(tmpText, Il2cppUtils::Il2CppString::New(value));
         }
 
+        static std::string CreateFanLevelRankingIconRenderJson(const std::string& profileIconPartsInfo) {
+            auto parsed = nlohmann::json::parse(profileIconPartsInfo, nullptr, false);
+            if (parsed.is_discarded()) return profileIconPartsInfo;
+
+            auto items = parsed.find("B");
+            if (items == parsed.end() || !items->is_array()) return profileIconPartsInfo;
+
+            const auto originalSize = items->size();
+            auto& itemArray = *items;
+            itemArray.erase(
+                std::remove_if(
+                    itemArray.begin(),
+                    itemArray.end(),
+                    [](const nlohmann::json& item) {
+                        const auto decoType = item.find("A");
+                        return decoType != item.end() && decoType->is_number_integer() && decoType->get<int>() == 6;
+                    }
+                ),
+                itemArray.end()
+            );
+            if (itemArray.size() == originalSize) return profileIconPartsInfo;
+
+            Log::InfoFmt(
+                "[FanLevelRanking] profile icon render json removed fan level frame count=%zu",
+                originalSize - itemArray.size()
+            );
+            return parsed.dump();
+        }
+
         static void UpdateProfileCustomPreset(void* profileCustomPreset, const std::string& profileIconPartsInfo) {
             if (!profileCustomPreset || profileIconPartsInfo.empty()) return;
             fanLevelRankingProfileIconPartsInfoByPreset[profileCustomPreset] = profileIconPartsInfo;
@@ -259,9 +289,10 @@ namespace LinkuraLocal::HookShare {
             }
 
             using UpdateDispFn = void(*)(void*, Il2cppUtils::Il2CppString*, void*);
+            const auto renderJson = CreateFanLevelRankingIconRenderJson(profileIconPartsInfo);
             reinterpret_cast<UpdateDispFn>(updateDispMethod)(
                 profileCustomPreset,
-                Il2cppUtils::Il2CppString::New(profileIconPartsInfo),
+                Il2cppUtils::Il2CppString::New(renderJson),
                 nullptr
             );
             Log::InfoFmt(
