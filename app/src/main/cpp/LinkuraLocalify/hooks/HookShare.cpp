@@ -1968,6 +1968,17 @@ namespace LinkuraLocal::HookShare {
                 ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
             );
         }
+        if (IsFanLevelUserRankingCellItem(correctedItemData)) {
+            ApplyFanLevelRankingCellDisplay(self, correctedItemData);
+            Log::InfoFmt(
+                "[FanLevelRanking] cell handled user ranking without original self=%p item=%p rank=%d playerId=%s",
+                self,
+                correctedItemData,
+                ReadMemberFanLevelRankingRank(correctedItemData),
+                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
+            );
+            return;
+        }
         FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
         ApplyFanLevelRankingCellDisplay(self, correctedItemData);
     }
