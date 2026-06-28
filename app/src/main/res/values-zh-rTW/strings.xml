@@ -260,5 +260,8 @@
     <string name="app_update_install">安裝</string>
     <string name="local_mode">本地模式</string>
     <string name="enable_offline_api_mock">使用自託管 API 伺服器</string>
+    <string name="resource_date_limit_settings">資源日期限制</string>
+    <string name="disable_resource_date_limit">停用資源日期限制</string>
+    <string name="disable_resource_date_limit_description">忽略資源 master 資料衍生的日期限制。不改寫資源檔案或資源版本。</string>
     <string name="local_mode_hint_collapsed">點擊標題展開設定。</string>
 </resources>

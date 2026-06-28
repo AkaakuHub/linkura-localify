@@ -260,5 +260,8 @@
     <string name="app_update_install">설치</string>
     <string name="local_mode">로컬 모드</string>
     <string name="enable_offline_api_mock">셀프호스트 API 서버 사용</string>
+    <string name="resource_date_limit_settings">리소스 날짜 제한</string>
+    <string name="disable_resource_date_limit">리소스 날짜 제한 비활성화</string>
+    <string name="disable_resource_date_limit_description">리소스 master 데이터에서 온 날짜 제한을 무시합니다. 리소스 파일이나 리소스 버전은 변경하지 않습니다.</string>
     <string name="local_mode_hint_collapsed">헤더를 탭하여 펼치세요.</string>
 </resources>

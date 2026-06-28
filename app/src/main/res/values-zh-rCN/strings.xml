@@ -63,6 +63,9 @@
     <string name="advanced_settings">高级设置</string>
     <string name="local_mode">本地模式</string>
     <string name="enable_offline_api_mock">使用自托管 API 服务器</string>
+    <string name="resource_date_limit_settings">资源日期限制</string>
+    <string name="disable_resource_date_limit">禁用资源日期限制</string>
+    <string name="disable_resource_date_limit_description">忽略资源 master 数据派生的日期限制。不改写资源文件或资源版本。</string>
     <string name="local_mode_hint_collapsed">点击标题展开设置。</string>
     <string name="about_warn_title">使用前警告</string>
     <string name="about_warn_p1">本插件仅供学习和交流使用。</string>

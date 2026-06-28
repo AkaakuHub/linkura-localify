@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -266,7 +265,7 @@ fun HomePage(modifier: Modifier = Modifier,
             Spacer(Modifier.height(6.dp))
         }
         item {
-            GakuGroupBox(modifier = modifier, "Settings") {
+            GakuGroupBox(modifier = modifier, stringResource(R.string.resource_date_limit_settings)) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     GakuSwitch(
                         modifier,
@@ -280,10 +279,13 @@ fun HomePage(modifier: Modifier = Modifier,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        item {
+            GakuGroupBox(modifier = modifier, stringResource(R.string.resource_settings)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     GakuTextInput(
                         value = config.value.assetsUrlPrefix,
                         onValueChange = { value ->

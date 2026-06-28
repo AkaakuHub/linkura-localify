@@ -260,5 +260,8 @@
     <string name="app_update_install">Instalar</string>
     <string name="local_mode">Modo local</string>
     <string name="enable_offline_api_mock">Usar servidor API selfhost</string>
+    <string name="resource_date_limit_settings">Límites de fecha de recursos</string>
+    <string name="disable_resource_date_limit">Desactivar límites de fecha de recursos</string>
+    <string name="disable_resource_date_limit_description">Ignora los límites de fecha derivados de los datos master de recursos. No reescribe archivos de recursos ni versiones de recursos.</string>
     <string name="local_mode_hint_collapsed">Toca el encabezado para expandir.</string>
 </resources>

@@ -260,5 +260,8 @@
     <string name="app_update_install">ติดตั้ง</string>
     <string name="local_mode">โหมดโลคัล</string>
     <string name="enable_offline_api_mock">ใช้เซิร์ฟเวอร์ API selfhost</string>
+    <string name="resource_date_limit_settings">ข้อจำกัดวันที่ของทรัพยากร</string>
+    <string name="disable_resource_date_limit">ปิดข้อจำกัดวันที่ของทรัพยากร</string>
+    <string name="disable_resource_date_limit_description">ละเว้นข้อจำกัดวันที่จากข้อมูล master ของทรัพยากร โดยไม่แก้ไขไฟล์ทรัพยากรหรือเวอร์ชันทรัพยากร</string>
     <string name="local_mode_hint_collapsed">แตะส่วนหัวเพื่อขยาย.</string>
 </resources>
