@@ -656,8 +656,4 @@ namespace LinkuraLocal::HttpMock {
         return TaskFromResultObject(resp);
     }
 
-    std::string FetchSelfhostApiBody(const std::string& baseUrl, const std::string& apiPath, const std::string& requestBodyJson) {
-        return FetchSelfhostApi(baseUrl, apiPath, requestBodyJson).body;
-    }
-
 }
