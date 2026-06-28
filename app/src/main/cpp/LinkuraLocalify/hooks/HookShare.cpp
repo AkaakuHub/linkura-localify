@@ -27,6 +27,13 @@ namespace LinkuraLocal::HookShare {
         static std::string LowercaseAscii(std::string value);
         nlohmann::json ObjectToJsonOrString(void* value);
 
+        struct UnityColor {
+            float r;
+            float g;
+            float b;
+            float a;
+        };
+
         static Il2cppUtils::FieldInfo* ResolveIl2CppField(
             void* klass,
             const char* fieldName
@@ -241,6 +248,64 @@ namespace LinkuraLocal::HookShare {
             );
         }
 
+        static bool IsOwnFanLevelRankingPlayer(void* itemData) {
+            if (!itemData) return false;
+            static auto isOwnPlayerIdMethod = Il2cppUtils::GetMethodIl2cpp(
+                "Assembly-CSharp.dll",
+                "School.LiveMain",
+                "OwnUserRepository",
+                "IsOwnPlayerId",
+                1
+            );
+            if (!isOwnPlayerIdMethod) return false;
+
+            using IsOwnPlayerIdFn = bool(*)(Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
+            return reinterpret_cast<IsOwnPlayerIdFn>(isOwnPlayerIdMethod->methodPointer)(
+                Il2cppUtils::Il2CppString::New(ReadMemberFanLevelRankingPlayerId(itemData)),
+                isOwnPlayerIdMethod
+            );
+        }
+
+        static void UpdateFanLevelRankingRankIcon(void* cell, void* itemData) {
+            if (!cell || !itemData) return;
+            static auto rankIconField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "rankIcon"
+            );
+            static auto playerRankColorField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "playerRankColor"
+            );
+            static auto otherPlayerRankColorField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "otherPlayerRankColor"
+            );
+            static auto updateRankMethod = Il2cppUtils::GetMethodIl2cpp(
+                "Assembly-CSharp.dll",
+                "Tecotec",
+                "CellRankIcon",
+                "UpdateRank",
+                2
+            );
+            if (!rankIconField || !playerRankColorField || !otherPlayerRankColorField || !updateRankMethod) return;
+
+            auto rankIcon = Il2cppUtils::ClassGetFieldValue<void*>(cell, rankIconField);
+            if (!rankIcon) return;
+
+            const auto colorField = IsOwnFanLevelRankingPlayer(itemData)
+                ? playerRankColorField
+                : otherPlayerRankColorField;
+            const auto rankTextColor = Il2cppUtils::ClassGetFieldValue<UnityColor>(cell, colorField);
+
+            using UpdateRankFn = void(*)(void*, int64_t, UnityColor, Il2cppUtils::MethodInfo*);
+            reinterpret_cast<UpdateRankFn>(updateRankMethod->methodPointer)(
+                rankIcon,
+                ReadMemberFanLevelRankingRank(itemData),
+                rankTextColor,
+                updateRankMethod
+            );
+        }
+
         static void ApplyFanLevelRankingCellDisplay(void* cell, void* itemData) {
             if (!cell || !itemData) return;
             static auto playerNameTextField = ResolveIl2CppField(
@@ -255,8 +320,13 @@ namespace LinkuraLocal::HookShare {
                 GetFanLevelRankingCellClass(),
                 "profileCustomPreset"
             );
-            if (!playerNameTextField || !memberLevelTextField || !profileCustomPresetField) return;
+            static auto itemDataField = ResolveIl2CppField(
+                GetFanLevelRankingCellClass(),
+                "itemData"
+            );
+            if (!playerNameTextField || !memberLevelTextField || !profileCustomPresetField || !itemDataField) return;
 
+            Il2cppUtils::ClassSetFieldValue<void*>(cell, itemDataField, itemData);
             auto playerNameText = Il2cppUtils::ClassGetFieldValue<void*>(cell, playerNameTextField);
             auto memberLevelText = Il2cppUtils::ClassGetFieldValue<void*>(cell, memberLevelTextField);
             auto profileCustomPreset = Il2cppUtils::ClassGetFieldValue<void*>(cell, profileCustomPresetField);
@@ -277,6 +347,18 @@ namespace LinkuraLocal::HookShare {
                 profileCustomPreset,
                 ReadMemberFanLevelRankingProfileIconPartsInfo(itemData)
             );
+            UpdateFanLevelRankingRankIcon(cell, itemData);
+        }
+
+        static bool IsFanLevelUserRankingCellItem(void* itemData) {
+            if (!latestFanLevelRankingResponse || !itemData) return false;
+
+            const auto myRank = ReadFanLevelRankingMyRank(latestFanLevelRankingResponse);
+            if (myRank <= 0 || myRank != ReadMemberFanLevelRankingRank(itemData)) return false;
+
+            auto userRanking = GetFanLevelRankingAt(latestFanLevelRankingResponse, myRank);
+            return userRanking
+                && ReadMemberFanLevelRankingPlayerId(userRanking) == ReadMemberFanLevelRankingPlayerId(itemData);
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -1880,6 +1962,17 @@ namespace LinkuraLocal::HookShare {
                 ReadMemberFanLevelRankingRank(correctedItemData),
                 ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
             );
+        }
+        if (IsFanLevelUserRankingCellItem(correctedItemData)) {
+            ApplyFanLevelRankingCellDisplay(self, correctedItemData);
+            Log::InfoFmt(
+                "[FanLevelRanking] cell handled user ranking without original self=%p item=%p rank=%d playerId=%s",
+                self,
+                correctedItemData,
+                ReadMemberFanLevelRankingRank(correctedItemData),
+                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
+            );
+            return;
         }
         FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
         ApplyFanLevelRankingCellDisplay(self, correctedItemData);
