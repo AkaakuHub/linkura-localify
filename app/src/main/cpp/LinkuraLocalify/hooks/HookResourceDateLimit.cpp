@@ -201,6 +201,31 @@ namespace LinkuraLocal::HookResourceDateLimit {
         );
     }
 
+    DEFINE_HOOK(
+        bool,
+        MusicSelectSceneController_EventListGrandPrixOpenPredicate,
+        (void* self, void* record, void* method)
+    ) {
+        if (Config::disableResourceDateLimit) {
+            return record != nullptr;
+        }
+        return MusicSelectSceneController_EventListGrandPrixOpenPredicate_Orig(self, record, method);
+    }
+
+    DEFINE_HOOK(
+        void,
+        MusicSelectEventListCell_Initialize,
+        (void* self, int32_t rhythmGameEventSeriesId, bool isLock, void* eventIcon, void* method)
+    ) {
+        MusicSelectEventListCell_Initialize_Orig(
+            self,
+            rhythmGameEventSeriesId,
+            Config::disableResourceDateLimit ? false : isLock,
+            eventIcon,
+            method
+        );
+    }
+
     void Install(HookInstaller* hookInstaller) {
         ADD_HOOK(
             GachaSeriesRecord_get_StartTime,
@@ -241,6 +266,15 @@ namespace LinkuraLocal::HookResourceDateLimit {
             "RhythmGame.MusicSelect",
             "MusicSelectSceneController"
         );
+        auto musicSelectSceneControllerHelperKlass = Il2cppUtils::find_nested_class_from_name(
+            musicSelectSceneControllerKlass,
+            "<>c"
+        );
+        auto musicSelectEventListCellKlass = Il2cppUtils::GetClassIl2cpp(
+            "Assembly-CSharp.dll",
+            "RhythmGame.MusicSelect",
+            "MusicSelectEventListCell"
+        );
         auto eventLockValuePredicate = Il2cppUtils::GetMethodIl2cpp(
             musicSelectFooterHelperKlass,
             "<SetEventLock>b__10_0",
@@ -261,6 +295,16 @@ namespace LinkuraLocal::HookResourceDateLimit {
             "<ConnectReactiveStreams>b__13_9",
             1
         );
+        auto eventListGrandPrixOpenPredicate = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectSceneControllerHelperKlass,
+            "<OpenMusicSelectEventListPopupAsync>b__23_1",
+            1
+        );
+        auto eventListCellInitialize = Il2cppUtils::GetMethodIl2cpp(
+            musicSelectEventListCellKlass,
+            "Initialize",
+            3
+        );
         ADD_HOOK(
             MusicSelectFooter_EventLockValuePredicate,
             eventLockValuePredicate ? eventLockValuePredicate->methodPointer : 0
@@ -276,6 +320,14 @@ namespace LinkuraLocal::HookResourceDateLimit {
         ADD_HOOK(
             MusicSelectSceneController_EventButtonSubscriber,
             eventButtonSubscriber ? eventButtonSubscriber->methodPointer : 0
+        );
+        ADD_HOOK(
+            MusicSelectSceneController_EventListGrandPrixOpenPredicate,
+            eventListGrandPrixOpenPredicate ? eventListGrandPrixOpenPredicate->methodPointer : 0
+        );
+        ADD_HOOK(
+            MusicSelectEventListCell_Initialize,
+            eventListCellInitialize ? eventListCellInitialize->methodPointer : 0
         );
     }
 }
