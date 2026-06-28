@@ -174,14 +174,16 @@ namespace LinkuraLocal::HookShare {
 
         static void* CorrectFanLevelRankingCellItem(void* itemData) {
             if (!latestFanLevelRankingResponse || !itemData) return itemData;
+            const auto itemPlayerId = ReadMemberFanLevelRankingPlayerId(itemData);
+            const auto itemPlayerName = ReadMemberFanLevelRankingPlayerName(itemData);
+            if (!itemPlayerId.empty() && !itemPlayerName.empty()) return itemData;
 
             const auto rank = ReadMemberFanLevelRankingRank(itemData);
             auto ranking = GetFanLevelRankingAt(latestFanLevelRankingResponse, rank);
             if (!ranking) return itemData;
 
-            const auto itemPlayerId = ReadMemberFanLevelRankingPlayerId(itemData);
             const auto rankingPlayerId = ReadMemberFanLevelRankingPlayerId(ranking);
-            if (itemPlayerId.empty() || itemPlayerId != rankingPlayerId) return itemData;
+            if (!itemPlayerId.empty() && itemPlayerId != rankingPlayerId) return itemData;
 
             return ranking;
         }
@@ -361,9 +363,7 @@ namespace LinkuraLocal::HookShare {
         }
 
         static bool IsFanLevelUserRankingCellItem(void* itemData) {
-            if (!latestFanLevelRankingResponse || !itemData) return false;
-
-            return ReadFanLevelRankingMyRank(latestFanLevelRankingResponse) == ReadMemberFanLevelRankingRank(itemData);
+            return IsOwnFanLevelRankingPlayer(itemData);
         }
 
         static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
@@ -1967,17 +1967,6 @@ namespace LinkuraLocal::HookShare {
                 ReadMemberFanLevelRankingRank(correctedItemData),
                 ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
             );
-        }
-        if (IsFanLevelUserRankingCellItem(correctedItemData)) {
-            ApplyFanLevelRankingCellDisplay(self, correctedItemData);
-            Log::InfoFmt(
-                "[FanLevelRanking] cell handled user ranking without original self=%p item=%p rank=%d playerId=%s",
-                self,
-                correctedItemData,
-                ReadMemberFanLevelRankingRank(correctedItemData),
-                ReadMemberFanLevelRankingPlayerId(correctedItemData).c_str()
-            );
-            return;
         }
         FanLevelDetailPopMemberRankingCell_UpdateContent_Orig(self, correctedItemData, method_info);
         ApplyFanLevelRankingCellDisplay(self, correctedItemData);

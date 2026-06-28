@@ -290,6 +290,12 @@ namespace LinkuraLocal::HookTranslation {
         if (!Config::enableLocale) return Text_set_text_Orig(self, sourceText, mtd);
         // 特判时间
         std::string origText = sourceText->ToString();
+        LogFanLevelRankingProbeText(
+            "UnityEngine.UI.Text.set_text",
+            self,
+            origText,
+            __builtin_return_address(0)
+        );
         RE2 time(R"((\d{1,2}:\d{1,2})|\d+)");
         if (RE2::FullMatch(origText, time)) return Text_set_text_Orig(self, sourceText, mtd);
         std::string transText;
