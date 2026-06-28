@@ -242,20 +242,27 @@ namespace LinkuraLocal::HookShare {
                 fanLevelRankingProfileIconPartsInfoByPreset.clear();
                 fanLevelRankingProfileIconPartsInfoByPreset[profileCustomPreset] = profileIconPartsInfo;
             }
-            static auto updateDispMethod = Il2cppUtils::GetMethodIl2cpp(
+            static auto updateDispMethod = Il2cppUtils::GetMethodPointer(
                 "Assembly-CSharp.dll",
                 "Tecotec",
                 "ProfileCustomPreset",
                 "UpdateDisp",
-                1
+                {"System.String"}
             );
-            if (!updateDispMethod) return;
+            if (!updateDispMethod) {
+                static bool logged = false;
+                if (!logged) {
+                    Log::Info("[FanLevelRanking] profile icon update method not found");
+                    logged = true;
+                }
+                return;
+            }
 
-            using UpdateDispFn = void(*)(void*, Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
-            reinterpret_cast<UpdateDispFn>(updateDispMethod->methodPointer)(
+            using UpdateDispFn = void(*)(void*, Il2cppUtils::Il2CppString*, void*);
+            reinterpret_cast<UpdateDispFn>(updateDispMethod)(
                 profileCustomPreset,
                 Il2cppUtils::Il2CppString::New(profileIconPartsInfo),
-                updateDispMethod
+                nullptr
             );
             Log::InfoFmt(
                 "[FanLevelRanking] profile icon update preset=%p iconLen=%zu",
