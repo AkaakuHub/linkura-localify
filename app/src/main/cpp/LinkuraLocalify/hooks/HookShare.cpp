@@ -271,19 +271,19 @@ namespace LinkuraLocal::HookShare {
             LoadHomeWallpaperSettingFromApiIfNeeded();
         }
 
-        static std::string ConsumeHomeDetailWallpaperRestoreCandidate() {
+        static std::string GetHomeDetailWallpaperRestoreCandidate() {
             LoadHomeWallpaperSettingFromApiIfNeeded();
             std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
-            if (homeWallpaperRestoreDisabled || homeDetailWallpaperRestoreConsumed) return {};
+            if (homeWallpaperRestoreDisabled) return {};
             if (!IsHomeDetailWallpaperSettingInfo(homeDetailWallpaperSettingInfo)) return {};
             homeDetailWallpaperRestoreConsumed = true;
             return homeDetailWallpaperSettingInfo;
         }
 
-        static std::string ConsumeHomeSimpleWallpaperRestoreCandidate() {
+        static std::string GetHomeSimpleWallpaperRestoreCandidate() {
             LoadHomeWallpaperSettingFromApiIfNeeded();
             std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
-            if (homeWallpaperRestoreDisabled || homeSimpleWallpaperRestoreConsumed) return {};
+            if (homeWallpaperRestoreDisabled) return {};
             if (!IsHomeSimpleWallpaperSettingInfo(homeSimpleWallpaperSettingInfo)) return {};
             homeSimpleWallpaperRestoreConsumed = true;
             return homeSimpleWallpaperSettingInfo;
@@ -1988,7 +1988,7 @@ namespace LinkuraLocal::HookShare {
         }
 
         auto converted = ConvertHomeDetailWallpaperDataFromString(
-            ConsumeHomeDetailWallpaperRestoreCandidate()
+            GetHomeDetailWallpaperRestoreCandidate()
         );
         if (converted && (Config::dbgMode || Config::enableOfflineApiMock)) {
             Log::Info("[HomeWallpaper] detail restore applied");
@@ -2000,7 +2000,7 @@ namespace LinkuraLocal::HookShare {
         HomeCustomSimpleDataEvent_Initialize_Orig(self, method_info);
 
         auto converted = ConvertHomeSimpleWallpaperDataFromString(
-            ConsumeHomeSimpleWallpaperRestoreCandidate()
+            GetHomeSimpleWallpaperRestoreCandidate()
         );
         if (converted) {
             *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(self) + 0x10) = converted;
