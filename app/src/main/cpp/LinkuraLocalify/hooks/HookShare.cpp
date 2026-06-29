@@ -10,8 +10,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-extern jclass g_linkuraHookMainClass;
-
 namespace LinkuraLocal::HookShare {
     static std::string GetSelfhostApiBaseUrl();
 
@@ -19,11 +17,6 @@ namespace LinkuraLocal::HookShare {
         std::mutex apiAuditContextMutex;
         std::string lastOfficialApiPath;
         std::string lastOfficialApiRequest;
-        std::mutex homeWallpaperMutex;
-        std::string homeWallpaperAuthorization;
-        std::string homeDetailWallpaperSettingInfo;
-        std::string homeSimpleWallpaperSettingInfo;
-        bool homeWallpaperLoaded = false;
         void* latestFanLevelRankingResponse = nullptr;
         std::unordered_map<void*, std::string> fanLevelRankingProfileIconPartsInfoByPreset;
         thread_local bool isApplyingFanLevelRankingCell = false;
@@ -394,279 +387,6 @@ namespace LinkuraLocal::HookShare {
 
         static bool IsFanLevelUserRankingCellItem(void* itemData) {
             return IsOwnFanLevelRankingPlayer(itemData);
-        }
-
-        static bool IsHomeDetailWallpaperSettingInfo(const std::string& value) {
-            auto json = nlohmann::json::parse(value, nullptr, false);
-            return !json.is_discarded()
-                && json.is_object()
-                && json.value("A", -1) == 3
-                && json.contains("B")
-                && json["B"].is_array();
-        }
-
-        static bool IsHomeSimpleWallpaperSettingInfo(const std::string& value) {
-            auto json = nlohmann::json::parse(value, nullptr, false);
-            return !json.is_discarded()
-                && json.is_object()
-                && json.contains("IsDisp")
-                && json["IsDisp"].is_boolean()
-                && json.contains("_Type")
-                && json["_Type"].is_number_integer()
-                && json.contains("CardFileId")
-                && json["CardFileId"].is_number_integer()
-                && json.contains("IsMovie")
-                && json["IsMovie"].is_boolean();
-        }
-
-        static std::string JsonStringField(const nlohmann::json& value, const char* key) {
-            if (!value.is_object()) return {};
-            const auto item = value.find(key);
-            if (item == value.end() || !item->is_string()) return {};
-            return item->get<std::string>();
-        }
-
-        static std::string FindAuthorizationHeader(const nlohmann::json& value) {
-            if (value.is_object()) {
-                for (const auto& item : value.items()) {
-                    if (LowercaseAscii(item.key()) == "authorization" && item.value().is_string()) {
-                        return item.value().get<std::string>();
-                    }
-                }
-                auto name = JsonStringField(value, "name");
-                if (name.empty()) name = JsonStringField(value, "Name");
-                if (LowercaseAscii(name) == "authorization") {
-                    auto headerValue = JsonStringField(value, "value");
-                    if (headerValue.empty()) headerValue = JsonStringField(value, "Value");
-                    if (!headerValue.empty()) return headerValue;
-                }
-                for (const auto& item : value.items()) {
-                    const auto found = FindAuthorizationHeader(item.value());
-                    if (!found.empty()) return found;
-                }
-            }
-            if (value.is_array()) {
-                for (const auto& item : value) {
-                    const auto found = FindAuthorizationHeader(item);
-                    if (!found.empty()) return found;
-                }
-            }
-            return {};
-        }
-
-        static void RememberHomeWallpaperAuthorization(void* headerParams) {
-            const auto authorization = FindAuthorizationHeader(ObjectToJsonOrString(headerParams));
-            if (authorization.empty()) return;
-
-            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-            if (authorization == homeWallpaperAuthorization) return;
-
-            homeWallpaperAuthorization = authorization;
-            homeWallpaperLoaded = false;
-            homeDetailWallpaperSettingInfo.clear();
-            homeSimpleWallpaperSettingInfo.clear();
-        }
-
-        static void ApplyHomeWallpaperSettingInfo(
-            const std::string& settingId,
-            const std::string& wallpaperSettingInfo
-        ) {
-            if (settingId == "home_detail_wallpaper" && IsHomeDetailWallpaperSettingInfo(wallpaperSettingInfo)) {
-                homeDetailWallpaperSettingInfo = wallpaperSettingInfo;
-                homeSimpleWallpaperSettingInfo.clear();
-                homeWallpaperLoaded = true;
-                return;
-            }
-            if (settingId == "home_simple_wallpaper" && IsHomeSimpleWallpaperSettingInfo(wallpaperSettingInfo)) {
-                homeSimpleWallpaperSettingInfo = wallpaperSettingInfo;
-                homeDetailWallpaperSettingInfo.clear();
-                homeWallpaperLoaded = true;
-            }
-        }
-
-        static void ApplyHomeWallpaperSettingBody(const nlohmann::json& json) {
-            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-            if (json.value("is_view_detail_wallpaper", false)) {
-                const auto detail = json.value("wallpaper_detail_setting_info", std::string{});
-                ApplyHomeWallpaperSettingInfo("home_detail_wallpaper", detail);
-                return;
-            }
-
-            const auto simple = json.value("wallpaper_simple_setting_info", std::string{});
-            ApplyHomeWallpaperSettingInfo("home_simple_wallpaper", simple);
-        }
-
-        static void InvalidateHomeWallpaperSettingCache(const nlohmann::json& json) {
-            const auto settingId = json.value("d_home_wall_paper_settings_id", std::string{});
-            if (settingId == "home_detail_wallpaper" || settingId == "home_simple_wallpaper") {
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                homeWallpaperLoaded = false;
-                homeDetailWallpaperSettingInfo.clear();
-                homeSimpleWallpaperSettingInfo.clear();
-            }
-        }
-
-        static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
-            if (
-                path != "/v1/home/notify_wallpaper_setting"
-                && path != "/v1/home/set_wallpaper_setting"
-                && path != "/v1/home/set_current_wallpaper_setting"
-            ) return;
-
-            auto json = nlohmann::json::parse(body, nullptr, false);
-            if (json.is_discarded() || !json.is_object()) return;
-
-            if (path == "/v1/home/notify_wallpaper_setting") {
-                ApplyHomeWallpaperSettingBody(json);
-                return;
-            }
-
-            if (path == "/v1/home/set_current_wallpaper_setting") {
-                InvalidateHomeWallpaperSettingCache(json);
-                return;
-            }
-
-            const auto settingId = json.value("d_home_wall_paper_settings_id", std::string{});
-            const auto wallpaperSettingInfo = json.value("wallpaper_setting_info", std::string{});
-            if (settingId.empty() || wallpaperSettingInfo.empty()) return;
-
-            auto settingInfoBody = nlohmann::json::parse(wallpaperSettingInfo, nullptr, false);
-            if (!settingInfoBody.is_discarded() && settingInfoBody.is_object()) {
-                if (
-                    settingInfoBody.contains("wallpaper_detail_setting_info")
-                    && settingInfoBody.contains("wallpaper_simple_setting_info")
-                    && settingInfoBody.contains("is_view_detail_wallpaper")
-                ) {
-                    ApplyHomeWallpaperSettingBody(settingInfoBody);
-                    return;
-                }
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                ApplyHomeWallpaperSettingInfo(settingId, wallpaperSettingInfo);
-            }
-        }
-
-        static nlohmann::json FetchHomeWallpaperSettingEnvelope(const std::string& authorization) {
-            const auto baseUrl = GetSelfhostApiBaseUrl();
-            if (baseUrl.empty()) return nlohmann::json::object();
-
-            auto env = Misc::GetJNIEnv();
-            if (!env || !g_linkuraHookMainClass) return nlohmann::json::object();
-
-            auto methodId = env->GetStaticMethodID(
-                g_linkuraHookMainClass,
-                "fetchSelfhostApiWithHeaders",
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
-            );
-            if (!methodId) {
-                env->ExceptionClear();
-                Log::Error("[HomeCustom] failed to resolve fetchSelfhostApiWithHeaders");
-                return nlohmann::json::object();
-            }
-
-            auto headers = nlohmann::json::object({{"authorization", authorization}});
-            auto jBaseUrl = env->NewStringUTF(baseUrl.c_str());
-            auto jApiPath = env->NewStringUTF("/v1/home/get_wallpaper_setting");
-            auto jRequestBodyJson = env->NewStringUTF("{}");
-            auto jHeadersJson = env->NewStringUTF(headers.dump().c_str());
-            auto result = static_cast<jstring>(env->CallStaticObjectMethod(
-                g_linkuraHookMainClass,
-                methodId,
-                jBaseUrl,
-                jApiPath,
-                jRequestBodyJson,
-                jHeadersJson
-            ));
-
-            std::string envelopeText;
-            if (env->ExceptionCheck()) {
-                env->ExceptionDescribe();
-                env->ExceptionClear();
-                Log::Error("[HomeCustom] get_wallpaper_setting request failed");
-            } else if (result) {
-                const char* chars = env->GetStringUTFChars(result, nullptr);
-                if (chars) {
-                    envelopeText = chars;
-                    env->ReleaseStringUTFChars(result, chars);
-                }
-            }
-
-            if (result) env->DeleteLocalRef(result);
-            env->DeleteLocalRef(jHeadersJson);
-            env->DeleteLocalRef(jRequestBodyJson);
-            env->DeleteLocalRef(jApiPath);
-            env->DeleteLocalRef(jBaseUrl);
-
-            auto envelope = nlohmann::json::parse(envelopeText, nullptr, false);
-            return envelope.is_object() ? envelope : nlohmann::json::object();
-        }
-
-        static void LoadHomeWallpaperSettingFromApiIfNeeded() {
-            std::string authorization;
-            {
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                if (homeWallpaperLoaded) return;
-                authorization = homeWallpaperAuthorization;
-            }
-            if (authorization.empty()) return;
-
-            const auto envelope = FetchHomeWallpaperSettingEnvelope(authorization);
-            auto body = nlohmann::json::parse(envelope.value("body", std::string{}), nullptr, false);
-            if (body.is_discarded() || !body.is_object()) {
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                homeWallpaperLoaded = true;
-                return;
-            }
-
-            const auto currentSettingId = body.value("current_home_wall_paper_settings_id", std::string{});
-            const auto settingList = body.find("wall_paper_setting_list");
-            if (settingList == body.end() || !settingList->is_array()) {
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                homeWallpaperLoaded = true;
-                return;
-            }
-
-            for (const auto& setting : *settingList) {
-                if (!setting.is_object()) continue;
-                if (setting.value("d_home_wall_paper_settings_id", std::string{}) != currentSettingId) continue;
-
-                const auto settingInfo = nlohmann::json::parse(
-                    setting.value("wallpaper_setting_info", std::string{}),
-                    nullptr,
-                    false
-                );
-                if (settingInfo.is_discarded() || !settingInfo.is_object()) break;
-
-                const auto detail = settingInfo.value("wallpaper_detail_setting_info", std::string{});
-                const auto simple = settingInfo.value("wallpaper_simple_setting_info", std::string{});
-                const bool isViewDetailWallpaper = settingInfo.value("is_view_detail_wallpaper", false);
-                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-                homeWallpaperLoaded = true;
-                homeDetailWallpaperSettingInfo =
-                    isViewDetailWallpaper && IsHomeDetailWallpaperSettingInfo(detail) ? detail : std::string{};
-                homeSimpleWallpaperSettingInfo =
-                    !isViewDetailWallpaper && IsHomeSimpleWallpaperSettingInfo(simple) ? simple : std::string{};
-                return;
-            }
-
-            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-            homeWallpaperLoaded = true;
-            homeDetailWallpaperSettingInfo.clear();
-            homeSimpleWallpaperSettingInfo.clear();
-        }
-
-        static std::string GetHomeDetailWallpaperSettingInfo() {
-            LoadHomeWallpaperSettingFromApiIfNeeded();
-            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-            return homeDetailWallpaperSettingInfo;
-        }
-
-        static std::string GetHomeSimpleWallpaperSettingInfo() {
-            LoadHomeWallpaperSettingFromApiIfNeeded();
-            std::lock_guard<std::mutex> lock(homeWallpaperMutex);
-            return homeSimpleWallpaperSettingInfo;
         }
 
         static bool IsRestSharpResponse(void* response) {
@@ -1899,8 +1619,6 @@ namespace LinkuraLocal::HookShare {
             {"request", strBody},
         };
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
-        RememberHomeWallpaperAuthorization(headerParams);
-        RememberHomeWallpaperRequest(strPath, strBody);
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -1928,71 +1646,6 @@ namespace LinkuraLocal::HookShare {
         return ApiClient_CallApiAsync_Orig(self, path, method, queryParams, postBody,
                                           headerParams, formParams, fileParams, pathParams,
                                           contentType, cancellationToken, method_info);
-    }
-
-    DEFINE_HOOK(void*, StickerCustomDataMng_GetSellectData, (void* self, int32_t type, void* method_info)) {
-        auto result = StickerCustomDataMng_GetSellectData_Orig(self, type, method_info);
-        if (type != 3) {
-            return result;
-        }
-
-        const auto settingInfo = GetHomeDetailWallpaperSettingInfo();
-        if (!IsHomeDetailWallpaperSettingInfo(settingInfo)) {
-            return result;
-        }
-
-        static auto convertMethod = Il2cppUtils::GetMethodIl2cpp(
-            "Assembly-CSharp.dll",
-            "Tecotec",
-            "StickerCustomDataMng",
-            "ConvertFromString",
-            1
-        );
-        if (!convertMethod || !convertMethod->methodPointer) {
-            return result;
-        }
-
-        using ConvertFromStringFn = void*(*)(Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
-        auto converted = reinterpret_cast<ConvertFromStringFn>(convertMethod->methodPointer)(
-            Il2cppUtils::Il2CppString::New(settingInfo),
-            convertMethod
-        );
-        if (!converted) {
-            return result;
-        }
-
-        return converted;
-    }
-
-    DEFINE_HOOK(void, HomeCustomSimpleDataEvent_Initialize, (void* self, void* method_info)) {
-        HomeCustomSimpleDataEvent_Initialize_Orig(self, method_info);
-
-        const auto settingInfo = GetHomeSimpleWallpaperSettingInfo();
-        if (!IsHomeSimpleWallpaperSettingInfo(settingInfo)) {
-            return;
-        }
-
-        static auto convertMethod = Il2cppUtils::GetMethodIl2cpp(
-            "Assembly-CSharp.dll",
-            "Tecotec",
-            "HomeCustomSimpleDataEvent",
-            "ConvertFromString",
-            1
-        );
-        if (!convertMethod || !convertMethod->methodPointer) {
-            return;
-        }
-
-        using ConvertFromStringFn = void*(*)(Il2cppUtils::Il2CppString*, Il2cppUtils::MethodInfo*);
-        auto converted = reinterpret_cast<ConvertFromStringFn>(convertMethod->methodPointer)(
-            Il2cppUtils::Il2CppString::New(settingInfo),
-            convertMethod
-        );
-        if (!converted) {
-            return;
-        }
-
-        *reinterpret_cast<void**>(static_cast<char*>(self) + 0x10) = converted;
     }
 
     DEFINE_HOOK(
@@ -2445,16 +2098,6 @@ namespace LinkuraLocal::HookShare {
         // GetHttpAsyncAddr
         ADD_HOOK(ApiClient_CallApiAsync, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "CallApiAsync"));
         ADD_HOOK(ApiClient_Deserialize, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client","ApiClient", "Deserialize"));
-        auto StickerCustomDataMng_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "StickerCustomDataMng");
-        if (StickerCustomDataMng_klass) {
-            auto getSellectDataMethod = Il2cppUtils::GetMethodIl2cpp(StickerCustomDataMng_klass, "GetSellectData", 1);
-            ADD_HOOK(StickerCustomDataMng_GetSellectData, getSellectDataMethod ? getSellectDataMethod->methodPointer : 0);
-        }
-        auto HomeCustomSimpleDataEvent_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "HomeCustomSimpleDataEvent");
-        if (HomeCustomSimpleDataEvent_klass) {
-            auto initializeMethod = Il2cppUtils::GetMethodIl2cpp(HomeCustomSimpleDataEvent_klass, "Initialize", 0);
-            ADD_HOOK(HomeCustomSimpleDataEvent_Initialize, initializeMethod ? initializeMethod->methodPointer : 0);
-        }
         auto FanLevelDetailPopMemberRankingData_klass = Il2cppUtils::GetClassIl2cpp("Assembly-CSharp.dll", "Tecotec", "FanLevelDetailPopMemberRankingData");
         if (FanLevelDetailPopMemberRankingData_klass) {
             auto ctorMethod = Il2cppUtils::GetMethodIl2cpp(FanLevelDetailPopMemberRankingData_klass, ".ctor", 2);
