@@ -1966,11 +1966,6 @@ namespace LinkuraLocal::HookShare {
             return result;
         }
 
-        if (IsHomeDetailWallpaperSettingInfo(ConvertHomeDetailWallpaperDataToString(result))) {
-            ConsumeHomeDetailWallpaperRestoreCandidate();
-            return result;
-        }
-
         auto converted = ConvertHomeDetailWallpaperDataFromString(
             ConsumeHomeDetailWallpaperRestoreCandidate()
         );
@@ -1979,12 +1974,6 @@ namespace LinkuraLocal::HookShare {
 
     DEFINE_HOOK(void, HomeCustomSimpleDataEvent_Initialize, (void* self, void* method_info)) {
         HomeCustomSimpleDataEvent_Initialize_Orig(self, method_info);
-
-        auto currentData = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(self) + 0x10);
-        if (IsHomeSimpleWallpaperSettingInfo(ConvertHomeSimpleWallpaperDataToString(currentData))) {
-            ConsumeHomeSimpleWallpaperRestoreCandidate();
-            return;
-        }
 
         auto converted = ConvertHomeSimpleWallpaperDataFromString(
             ConsumeHomeSimpleWallpaperRestoreCandidate()
