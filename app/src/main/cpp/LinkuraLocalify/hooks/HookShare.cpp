@@ -1963,23 +1963,45 @@ namespace LinkuraLocal::HookShare {
             return ResolveApiBasePathString(current, source);
         }
 
-        static void ApplyCurrentApiBasePathToApiClient(void* self);
+        static void* CreateCurrentApiBaseUriObject(const char* source) {
+            static auto uriClass = Il2cppUtils::GetClassIl2cpp("mscorlib.dll", "System", "Uri");
+            static auto uriCtor = Il2cppUtils::GetMethodIl2cpp("mscorlib.dll", "System", "Uri", ".ctor", 1);
+            if (!uriClass || !uriCtor || !uriCtor->methodPointer) {
+                Log::Error("[SelfhostAudit] System.Uri constructor not found.");
+                return nullptr;
+            }
+            auto uri = UnityResolve::Invoke<void*>("il2cpp_object_new", uriClass);
+            if (!uri) {
+                Log::Error("[SelfhostAudit] System.Uri allocation failed.");
+                return nullptr;
+            }
+            reinterpret_cast<void (*)(void*, Il2cppUtils::Il2CppString*, void*)>(uriCtor->methodPointer)(
+                uri,
+                CreateCurrentApiBasePathString(source),
+                uriCtor
+            );
+            return uri;
+        }
 
-    DEFINE_HOOK(Il2cppUtils::Il2CppString*, ApiClient_get_BasePath, (void* self, void* mtd)) {
-        auto result = ApiClient_get_BasePath_Orig(self, mtd);
-        return ResolveApiBasePathString(result, "ApiClient.get_BasePath");
+    DEFINE_HOOK(void, RestClient_set_BaseUrl, (void* self, void* value, void* mtd)) {
+        RestClient_set_BaseUrl_Orig(self, value, mtd);
     }
 
-    DEFINE_HOOK(void, ApiClient_set_BasePath, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
-        ApiClient_set_BasePath_Orig(self, ResolveApiBasePathString(value, "ApiClient.set_BasePath"), mtd);
-    }
-
-        static void ApplyCurrentApiBasePathToApiClient(void* self) {
-            if (!ApiClient_set_BasePath_Orig) {
+        static void ApplyCurrentApiBaseUrlToRestClient(void* restClient, const char* source) {
+            if (!restClient || !RestClient_set_BaseUrl_Orig) {
                 return;
             }
-            ApiClient_set_BasePath_Orig(self, CreateCurrentApiBasePathString("ApiClient.CallApiAsync"), nullptr);
+            auto uri = CreateCurrentApiBaseUriObject(source);
+            if (!uri) {
+                return;
+            }
+            RestClient_set_BaseUrl_Orig(restClient, uri, nullptr);
         }
+
+    DEFINE_HOOK(void*, RestClient_BuildUri, (void* self, void* request, void* mtd)) {
+        ApplyCurrentApiBaseUrlToRestClient(self, "RestClient.BuildUri");
+        return RestClient_BuildUri_Orig(self, request, mtd);
+    }
 
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
             Il2cppUtils::Il2CppString* path, void* method,
@@ -2006,7 +2028,6 @@ namespace LinkuraLocal::HookShare {
         RememberHomeWallpaperRequest(strPath, strBody);
         DisableHomeWallpaperRestoreForCustomSettingRequest(strPath);
         PrimeHomeWallpaperRestoreForHomeRequest(strPath);
-        ApplyCurrentApiBasePathToApiClient(self);
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -2684,8 +2705,8 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(Configuration_AddDefaultHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "AddDefaultHeader"));
         ADD_HOOK(Configuration_set_UserAgent, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_UserAgent"));
         ADD_HOOK(ApiClient_ctor_string, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", ".ctor", {"System.String"}));
-        ADD_HOOK(ApiClient_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", "get_BasePath"));
-        ADD_HOOK(ApiClient_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", "set_BasePath"));
+        ADD_HOOK(RestClient_set_BaseUrl, Il2cppUtils::GetMethodPointer("RestSharp.dll", "RestSharp", "RestClient", "set_BaseUrl"));
+        ADD_HOOK(RestClient_BuildUri, Il2cppUtils::GetMethodPointer("RestSharp.dll", "RestSharp", "RestClient", "BuildUri"));
         method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", ".ctor", 4);
         ADD_HOOK(Configuration_ctor_dictionaries, method ? method->methodPointer : 0);
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
