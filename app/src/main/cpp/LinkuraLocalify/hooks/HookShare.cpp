@@ -1918,8 +1918,25 @@ namespace LinkuraLocal::HookShare {
             return Il2cppUtils::Il2CppString::New(rewritten);
         }
 
-        static Il2cppUtils::Il2CppString* RewriteApiBasePathString(Il2cppUtils::Il2CppString* value, const char* source) {
-            if (!Config::enableOfflineApiMock) return value;
+        static constexpr const char* officialApiBaseUrl = "https://api.link-like-lovelive.app";
+
+        static bool IsConfiguredSelfhostApiBaseUrl(const std::string& value) {
+            return !Config::apiMockBaseUrl.empty() && value == Config::apiMockBaseUrl;
+        }
+
+        static Il2cppUtils::Il2CppString* ResolveApiBasePathString(Il2cppUtils::Il2CppString* value, const char* source) {
+            if (!Config::enableOfflineApiMock) {
+                const auto original = value ? value->ToString() : "(null)";
+                if (IsConfiguredSelfhostApiBaseUrl(original)) {
+                    AppendOfficialRequestAudit("api_basepath_restored", original, {{"rewritten", officialApiBaseUrl}, {"source", source}});
+                    Log::WarnFmt("[SelfhostAudit] API base path restored source=%s %s -> %s",
+                                 source,
+                                 original.c_str(),
+                                 officialApiBaseUrl);
+                    return Il2cppUtils::Il2CppString::New(officialApiBaseUrl);
+                }
+                return value;
+            }
 
             const auto baseUrl = GetSelfhostApiBaseUrl();
             const auto original = value ? value->ToString() : "(null)";
@@ -1937,6 +1954,31 @@ namespace LinkuraLocal::HookShare {
                          original.c_str(),
                          baseUrl.c_str());
             return Il2cppUtils::Il2CppString::New(baseUrl);
+        }
+
+        static Il2cppUtils::Il2CppString* CreateCurrentApiBasePathString(const char* source) {
+            const auto current = Config::enableOfflineApiMock
+                ? Il2cppUtils::Il2CppString::New(Config::apiMockBaseUrl)
+                : Il2cppUtils::Il2CppString::New(officialApiBaseUrl);
+            return ResolveApiBasePathString(current, source);
+        }
+
+        static void ApplyCurrentApiBasePathToApiClient(void* self);
+
+    DEFINE_HOOK(Il2cppUtils::Il2CppString*, ApiClient_get_BasePath, (void* self, void* mtd)) {
+        auto result = ApiClient_get_BasePath_Orig(self, mtd);
+        return ResolveApiBasePathString(result, "ApiClient.get_BasePath");
+    }
+
+    DEFINE_HOOK(void, ApiClient_set_BasePath, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
+        ApiClient_set_BasePath_Orig(self, ResolveApiBasePathString(value, "ApiClient.set_BasePath"), mtd);
+    }
+
+        static void ApplyCurrentApiBasePathToApiClient(void* self) {
+            if (!ApiClient_set_BasePath_Orig) {
+                return;
+            }
+            ApiClient_set_BasePath_Orig(self, CreateCurrentApiBasePathString("ApiClient.CallApiAsync"), nullptr);
         }
 
     DEFINE_HOOK(void*, ApiClient_CallApiAsync, (void* self,
@@ -1964,6 +2006,7 @@ namespace LinkuraLocal::HookShare {
         RememberHomeWallpaperRequest(strPath, strBody);
         DisableHomeWallpaperRestoreForCustomSettingRequest(strPath);
         PrimeHomeWallpaperRestoreForHomeRequest(strPath);
+        ApplyCurrentApiBasePathToApiClient(self);
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -2304,7 +2347,7 @@ namespace LinkuraLocal::HookShare {
             ApiClient_ctor_string_Orig(self, basePath, mtd);
             return;
         }
-        ApiClient_ctor_string_Orig(self, RewriteApiBasePathString(basePath, "ApiClient.ctor(string)"), mtd);
+        ApiClient_ctor_string_Orig(self, ResolveApiBasePathString(basePath, "ApiClient.ctor(string)"), mtd);
     }
 
     DEFINE_HOOK(void, Configuration_ctor_dictionaries, (void* self, void* defaultHeader, void* apiKey, void* apiKeyPrefix, Il2cppUtils::Il2CppString* basePath, void* mtd)) {
@@ -2316,24 +2359,17 @@ namespace LinkuraLocal::HookShare {
                                              defaultHeader,
                                              apiKey,
                                              apiKeyPrefix,
-                                             RewriteApiBasePathString(basePath, "Configuration.ctor(..., string)"),
+                                             ResolveApiBasePathString(basePath, "Configuration.ctor(..., string)"),
                                              mtd);
     }
 
     DEFINE_HOOK(Il2cppUtils::Il2CppString*, Configuration_get_BasePath, (void* self, void* mtd)) {
         auto result = Configuration_get_BasePath_Orig(self, mtd);
-        if (Config::enableOfflineApiMock) {
-            return RewriteApiBasePathString(result, "Configuration.get_BasePath");
-        }
-        return result;
+        return ResolveApiBasePathString(result, "Configuration.get_BasePath");
     }
 
     DEFINE_HOOK(void, Configuration_set_BasePath, (void* self, Il2cppUtils::Il2CppString* value, void* mtd)) {
-        if (!Config::enableOfflineApiMock) {
-            Configuration_set_BasePath_Orig(self, value, mtd);
-            return;
-        }
-        Configuration_set_BasePath_Orig(self, RewriteApiBasePathString(value, "Configuration.set_BasePath"), mtd);
+        Configuration_set_BasePath_Orig(self, ResolveApiBasePathString(value, "Configuration.set_BasePath"), mtd);
     }
 
     DEFINE_HOOK(void, WebViewCtrl_LoadView, (void* self, Il2cppUtils::Il2CppString* url, void* mtd)) {
@@ -2648,6 +2684,8 @@ namespace LinkuraLocal::HookShare {
         ADD_HOOK(Configuration_AddDefaultHeader, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "AddDefaultHeader"));
         ADD_HOOK(Configuration_set_UserAgent, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "set_UserAgent"));
         ADD_HOOK(ApiClient_ctor_string, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", ".ctor", {"System.String"}));
+        ADD_HOOK(ApiClient_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", "get_BasePath"));
+        ADD_HOOK(ApiClient_set_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "ApiClient", "set_BasePath"));
         method = Il2cppUtils::GetMethodIl2cpp("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", ".ctor", 4);
         ADD_HOOK(Configuration_ctor_dictionaries, method ? method->methodPointer : 0);
         ADD_HOOK(Configuration_get_BasePath, Il2cppUtils::GetMethodPointer("Assembly-CSharp.dll", "Org.OpenAPITools.Client", "Configuration", "get_BasePath"));
