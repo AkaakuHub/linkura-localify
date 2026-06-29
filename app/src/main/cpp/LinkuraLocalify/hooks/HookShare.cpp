@@ -295,6 +295,33 @@ namespace LinkuraLocal::HookShare {
             return homeSimpleWallpaperSettingInfo;
         }
 
+        static void* GetSelectedHomeWallpaperWrapper(void* stickerCustomDataMng) {
+            if (!stickerCustomDataMng) return nullptr;
+
+            auto customDataCache = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(stickerCustomDataMng) + 0x10);
+            auto customSetIds = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(stickerCustomDataMng) + 0x18);
+            if (!customDataCache || !customSetIds) return nullptr;
+
+            Il2cppUtils::Tools::CSDictEditor<int32_t, void*> customDataCacheDict(customDataCache);
+            Il2cppUtils::Tools::CSDictEditor<int32_t, int32_t> customSetIdDict(customSetIds);
+
+            auto wrappers = customDataCacheDict.get_Item(3);
+            if (!wrappers) return nullptr;
+
+            const auto selectedIndex = customSetIdDict.get_Item(3);
+            if (selectedIndex < 0) return nullptr;
+
+            const auto wrapperCount = *reinterpret_cast<int32_t*>(reinterpret_cast<uintptr_t>(wrappers) + 0x18);
+            if (selectedIndex >= wrapperCount) return nullptr;
+
+            return *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(wrappers) + 0x20 + static_cast<uintptr_t>(selectedIndex) * sizeof(void*));
+        }
+
+        static void SetHomeWallpaperWrapperData(void* wrapper, void* customData) {
+            if (!wrapper || !customData) return;
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(wrapper) + 0x18) = customData;
+        }
+
         static std::string ConvertHomeDetailWallpaperDataToString(void* customData) {
             if (!customData) return {};
             static auto convertMethod = Il2cppUtils::GetMethodIl2cpp(
@@ -1999,6 +2026,9 @@ namespace LinkuraLocal::HookShare {
         );
         if (converted && (Config::dbgMode || Config::enableOfflineApiMock)) {
             Log::Info("[HomeWallpaper] detail restore applied");
+        }
+        if (converted) {
+            SetHomeWallpaperWrapperData(GetSelectedHomeWallpaperWrapper(self), converted);
         }
         return converted ? converted : result;
     }
