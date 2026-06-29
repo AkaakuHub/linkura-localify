@@ -149,6 +149,19 @@ namespace LinkuraLocal::HookShare {
             homeSimpleWallpaperSettingInfo.clear();
         }
 
+        static void DisableHomeWallpaperRestoreForCustomSettingRequest(const std::string& path) {
+            if (path != "/v1/home/get_custom_setting") return;
+
+            std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
+            if (!homeDetailWallpaperRestoreConsumed && !homeSimpleWallpaperRestoreConsumed) return;
+            homeWallpaperRestoreDisabled = true;
+            homeDetailWallpaperSettingInfo.clear();
+            homeSimpleWallpaperSettingInfo.clear();
+            if (Config::dbgMode || Config::enableOfflineApiMock) {
+                Log::Info("[HomeWallpaper] restore disabled for home custom setting");
+            }
+        }
+
         static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
             if (path == "/v1/home/set_wallpaper_setting" || path == "/v1/home/set_current_wallpaper_setting") {
                 DisableHomeWallpaperRestoreAfterMutation();
@@ -1951,6 +1964,7 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
         RememberHomeWallpaperAuthorization(headerParams);
         RememberHomeWallpaperRequest(strPath, strBody);
+        DisableHomeWallpaperRestoreForCustomSettingRequest(strPath);
         PrimeHomeWallpaperRestoreForHomeRequest(strPath);
 
         if (Config::enableOfflineApiMock && path) {
