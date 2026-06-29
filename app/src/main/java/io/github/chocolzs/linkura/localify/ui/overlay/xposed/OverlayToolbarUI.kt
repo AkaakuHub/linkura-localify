@@ -16,8 +16,10 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Toast
 import android.graphics.drawable.GradientDrawable
 import io.github.chocolzs.linkura.localify.LinkuraHookMain
+import io.github.chocolzs.linkura.localify.OfficialUserDataDumpExporter
 import io.github.chocolzs.linkura.localify.TAG
 
 class OverlayToolbarUI {
@@ -39,6 +41,7 @@ class OverlayToolbarUI {
     private lateinit var freeCameraControlButton: ImageButton
     private lateinit var colorPickerButton: FrameLayout
     private lateinit var colorIndicator: View
+    private var isOfficialDumpRunning = false
 
     private var initialX = 0
     private var initialY = 0
@@ -296,6 +299,10 @@ class OverlayToolbarUI {
             }
             addView(colorPickerButton)
 
+            addView(createMainToolButton(activity, SVGIcon.Refresh::createDrawable, "Save official user data") {
+                startOfficialUserDataDump(activity)
+            })
+
             // Collapse button
             addView(createMainToolButton(activity, SVGIcon.KeyboardArrowRight::createDrawable, "Collapse") {
                 toggleExpansion()
@@ -317,9 +324,42 @@ class OverlayToolbarUI {
             setBackgroundColor(Color.TRANSPARENT)
             setImageDrawable(iconCreator(activity, Color.WHITE, 20f))
             scaleType = ImageView.ScaleType.CENTER
+            this.contentDescription = contentDescription
 
             setOnClickListener { onClick() }
         }
+    }
+
+    private fun startOfficialUserDataDump(activity: Activity) {
+        if (isOfficialDumpRunning) {
+            Toast.makeText(activity, "公式データを保存中です", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isOfficialDumpRunning = true
+        Toast.makeText(activity, "公式データの保存を開始しました", Toast.LENGTH_SHORT).show()
+
+        Thread {
+            val result = runCatching {
+                OfficialUserDataDumpExporter.collectAndExport(activity.applicationContext)
+            }
+            activity.runOnUiThread {
+                isOfficialDumpRunning = false
+                result.onSuccess { dumpResult ->
+                    Toast.makeText(
+                        activity,
+                        "公式データを保存しました: ${dumpResult.zipFile.name} 成功${dumpResult.successCount}件 失敗${dumpResult.failureCount}件",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }.onFailure { error ->
+                    Log.e(TAG, "Failed to save official user data dump", error)
+                    Toast.makeText(
+                        activity,
+                        "公式データの保存に失敗しました: ${error.message ?: error.javaClass.simpleName}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }.start()
     }
 
     private fun createCameraSecondaryMenu(activity: Activity) {
