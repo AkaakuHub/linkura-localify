@@ -59,6 +59,9 @@ object OfficialUserDataDumpExporter {
                 .put("status_code", result.statusCode)
                 .put("reason", result.reason)
                 .put("captured_at_ms", result.capturedAtMs)
+            if (target.path == "/user/card/get_list" && result.isSuccess) {
+                collectUserCardDetails(authContext, result.event, directApiEvents, directAuditEvents, coverageEntries)
+            }
         }
 
         val outputDir = File(filesDir, "official_user_data_dumps").apply { mkdirs() }
@@ -112,6 +115,52 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_stage_select", JSONObject()),
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
         )
+    }
+
+    private fun collectUserCardDetails(
+        authContext: OfficialApiAuthContext,
+        cardListEvent: JSONObject,
+        directApiEvents: MutableList<String>,
+        directAuditEvents: MutableList<String>,
+        coverageEntries: MutableList<JSONObject>,
+    ) {
+        val cardIds = extractUserCardIds(cardListEvent)
+        for (dCardDatasId in cardIds) {
+            val target = CollectionTarget("userCardDetails", "/user/card/get_detail", JSONObject().put("d_card_datas_id", dCardDatasId))
+            val requestBody = target.requestBody.toString()
+            val startedAtMs = System.currentTimeMillis()
+            directAuditEvents += JSONObject()
+                .put("kind", "official_user_dump_direct_request")
+                .put("target", "/v1${target.path}")
+                .put("detail", JSONObject().put("request", requestBody))
+                .put("current_client_version", authContext.clientVersion)
+                .put("current_res_version", authContext.resVersion)
+                .put("captured_at_ms", startedAtMs)
+                .toString()
+            val result = postOfficialApi(authContext, target.path, requestBody)
+            directApiEvents += result.event.toString()
+            coverageEntries += JSONObject()
+                .put("category", target.category)
+                .put("source_endpoint", "/v1${target.path}")
+                .put("request", target.requestBody)
+                .put("status", if (result.isSuccess) "dumped" else "missing")
+                .put("status_code", result.statusCode)
+                .put("reason", result.reason)
+                .put("captured_at_ms", result.capturedAtMs)
+        }
+    }
+
+    private fun extractUserCardIds(cardListEvent: JSONObject): List<String> {
+        val response = cardListEvent.optJSONObject("response")
+            ?: cardListEvent.optJSONObject("rest_response")?.optString("content")?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?: return emptyList()
+        val cards = response.optJSONArray("user_card_data_list") ?: return emptyList()
+        val cardIds = mutableListOf<String>()
+        for (index in 0 until cards.length()) {
+            val cardId = cards.optJSONObject(index)?.optString("d_card_datas_id").orEmpty()
+            if (cardId.isNotBlank()) cardIds += cardId
+        }
+        return cardIds.distinct()
     }
 
     private fun readLatestAuthContext(apiDumpFile: File): OfficialApiAuthContext {
