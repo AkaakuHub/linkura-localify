@@ -467,28 +467,84 @@ namespace LinkuraLocal::HookShare {
             homeSimpleWallpaperSettingInfo.clear();
         }
 
-        static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
-            if (path != "/v1/home/notify_wallpaper_setting") return;
+        static void ApplyHomeWallpaperSettingInfo(
+            const std::string& settingId,
+            const std::string& wallpaperSettingInfo
+        ) {
+            if (settingId == "home_detail_wallpaper" && IsHomeDetailWallpaperSettingInfo(wallpaperSettingInfo)) {
+                homeDetailWallpaperSettingInfo = wallpaperSettingInfo;
+                homeSimpleWallpaperSettingInfo.clear();
+                homeWallpaperLoaded = true;
+                return;
+            }
+            if (settingId == "home_simple_wallpaper" && IsHomeSimpleWallpaperSettingInfo(wallpaperSettingInfo)) {
+                homeSimpleWallpaperSettingInfo = wallpaperSettingInfo;
+                homeDetailWallpaperSettingInfo.clear();
+                homeWallpaperLoaded = true;
+            }
+        }
 
-            auto json = nlohmann::json::parse(body, nullptr, false);
-            if (json.is_discarded() || !json.is_object()) return;
-
+        static void ApplyHomeWallpaperSettingBody(const nlohmann::json& json) {
             std::lock_guard<std::mutex> lock(homeWallpaperMutex);
             if (json.value("is_view_detail_wallpaper", false)) {
                 const auto detail = json.value("wallpaper_detail_setting_info", std::string{});
-                if (IsHomeDetailWallpaperSettingInfo(detail)) {
-                    homeDetailWallpaperSettingInfo = detail;
-                    homeSimpleWallpaperSettingInfo.clear();
-                    homeWallpaperLoaded = true;
-                }
+                ApplyHomeWallpaperSettingInfo("home_detail_wallpaper", detail);
                 return;
             }
 
             const auto simple = json.value("wallpaper_simple_setting_info", std::string{});
-            if (IsHomeSimpleWallpaperSettingInfo(simple)) {
-                homeSimpleWallpaperSettingInfo = simple;
+            ApplyHomeWallpaperSettingInfo("home_simple_wallpaper", simple);
+        }
+
+        static void InvalidateHomeWallpaperSettingCache(const nlohmann::json& json) {
+            const auto settingId = json.value("d_home_wall_paper_settings_id", std::string{});
+            if (settingId == "home_detail_wallpaper" || settingId == "home_simple_wallpaper") {
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                homeWallpaperLoaded = false;
                 homeDetailWallpaperSettingInfo.clear();
-                homeWallpaperLoaded = true;
+                homeSimpleWallpaperSettingInfo.clear();
+            }
+        }
+
+        static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
+            if (
+                path != "/v1/home/notify_wallpaper_setting"
+                && path != "/v1/home/set_wallpaper_setting"
+                && path != "/v1/home/set_current_wallpaper_setting"
+            ) return;
+
+            auto json = nlohmann::json::parse(body, nullptr, false);
+            if (json.is_discarded() || !json.is_object()) return;
+
+            if (path == "/v1/home/notify_wallpaper_setting") {
+                ApplyHomeWallpaperSettingBody(json);
+                return;
+            }
+
+            if (path == "/v1/home/set_current_wallpaper_setting") {
+                InvalidateHomeWallpaperSettingCache(json);
+                return;
+            }
+
+            const auto settingId = json.value("d_home_wall_paper_settings_id", std::string{});
+            const auto wallpaperSettingInfo = json.value("wallpaper_setting_info", std::string{});
+            if (settingId.empty() || wallpaperSettingInfo.empty()) return;
+
+            auto settingInfoBody = nlohmann::json::parse(wallpaperSettingInfo, nullptr, false);
+            if (!settingInfoBody.is_discarded() && settingInfoBody.is_object()) {
+                if (
+                    settingInfoBody.contains("wallpaper_detail_setting_info")
+                    && settingInfoBody.contains("wallpaper_simple_setting_info")
+                    && settingInfoBody.contains("is_view_detail_wallpaper")
+                ) {
+                    ApplyHomeWallpaperSettingBody(settingInfoBody);
+                    return;
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(homeWallpaperMutex);
+                ApplyHomeWallpaperSettingInfo(settingId, wallpaperSettingInfo);
             }
         }
 
