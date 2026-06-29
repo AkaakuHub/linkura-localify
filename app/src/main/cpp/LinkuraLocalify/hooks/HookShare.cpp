@@ -1964,8 +1964,8 @@ namespace LinkuraLocal::HookShare {
         }
 
         static void* CreateCurrentApiBaseUriObject(const char* source) {
-            static auto uriClass = Il2cppUtils::GetClassIl2cpp("mscorlib.dll", "System", "Uri");
-            static auto uriCtor = Il2cppUtils::GetMethodIl2cpp("mscorlib.dll", "System", "Uri", ".ctor", 1);
+            static auto uriClass = Il2cppUtils::GetClassIl2cpp("System.dll", "System", "Uri");
+            static auto uriCtor = Il2cppUtils::GetMethodIl2cpp("System.dll", "System", "Uri", ".ctor", 1);
             if (!uriClass || !uriCtor || !uriCtor->methodPointer) {
                 Log::Error("[SelfhostAudit] System.Uri constructor not found.");
                 return nullptr;
