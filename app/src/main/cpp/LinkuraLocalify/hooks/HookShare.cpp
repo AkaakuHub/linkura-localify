@@ -132,6 +132,13 @@ namespace LinkuraLocal::HookShare {
                 isViewDetailWallpaper && IsHomeDetailWallpaperSettingInfo(detail) ? detail : std::string{};
             homeSimpleWallpaperSettingInfo =
                 !isViewDetailWallpaper && IsHomeSimpleWallpaperSettingInfo(simple) ? simple : std::string{};
+            if (Config::dbgMode || Config::enableOfflineApiMock) {
+                Log::InfoFmt(
+                    "[HomeWallpaper] restore candidate stored detail=%d simple=%d",
+                    !homeDetailWallpaperSettingInfo.empty(),
+                    !homeSimpleWallpaperSettingInfo.empty()
+                );
+            }
         }
 
         static void DisableHomeWallpaperRestoreAfterMutation() {
@@ -215,8 +222,16 @@ namespace LinkuraLocal::HookShare {
                 if (homeWallpaperLoaded || homeWallpaperRestoreDisabled) return;
                 authorization = homeWallpaperAuthorization;
             }
-            if (authorization.empty()) return;
+            if (authorization.empty()) {
+                if (Config::dbgMode || Config::enableOfflineApiMock) {
+                    Log::Info("[HomeWallpaper] restore fetch skipped: authorization missing");
+                }
+                return;
+            }
 
+            if (Config::dbgMode || Config::enableOfflineApiMock) {
+                Log::Info("[HomeWallpaper] restore fetch: /v1/home/get_wallpaper_setting");
+            }
             const auto envelope = FetchHomeWallpaperSettingEnvelope(authorization);
             auto body = nlohmann::json::parse(envelope.value("body", std::string{}), nullptr, false);
             if (body.is_discarded() || !body.is_object()) {
@@ -249,6 +264,11 @@ namespace LinkuraLocal::HookShare {
 
             std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
             homeWallpaperLoaded = true;
+        }
+
+        static void PrimeHomeWallpaperRestoreForHomeRequest(const std::string& path) {
+            if (path != "/v1/home/get_home" && path != "/v1/home/get_custom_setting") return;
+            LoadHomeWallpaperSettingFromApiIfNeeded();
         }
 
         static std::string ConsumeHomeDetailWallpaperRestoreCandidate() {
@@ -1931,6 +1951,7 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
         RememberHomeWallpaperAuthorization(headerParams);
         RememberHomeWallpaperRequest(strPath, strBody);
+        PrimeHomeWallpaperRestoreForHomeRequest(strPath);
 
         if (Config::enableOfflineApiMock && path) {
             const auto selfhostApiBaseUrl = GetSelfhostApiBaseUrl();
@@ -1969,6 +1990,9 @@ namespace LinkuraLocal::HookShare {
         auto converted = ConvertHomeDetailWallpaperDataFromString(
             ConsumeHomeDetailWallpaperRestoreCandidate()
         );
+        if (converted && (Config::dbgMode || Config::enableOfflineApiMock)) {
+            Log::Info("[HomeWallpaper] detail restore applied");
+        }
         return converted ? converted : result;
     }
 
@@ -1980,6 +2004,9 @@ namespace LinkuraLocal::HookShare {
         );
         if (converted) {
             *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(self) + 0x10) = converted;
+            if (Config::dbgMode || Config::enableOfflineApiMock) {
+                Log::Info("[HomeWallpaper] simple restore applied");
+            }
         }
     }
 
