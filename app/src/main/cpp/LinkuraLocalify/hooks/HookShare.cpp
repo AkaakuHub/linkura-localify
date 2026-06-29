@@ -25,7 +25,6 @@ namespace LinkuraLocal::HookShare {
         std::string homeSimpleWallpaperSettingInfo;
         bool homeWallpaperLoaded = false;
         bool homeWallpaperRestoreDisabled = false;
-        bool homeWallpaperRestoreDisableAfterNextApply = false;
         bool homeDetailWallpaperRestoreConsumed = false;
         bool homeSimpleWallpaperRestoreConsumed = false;
         void* latestFanLevelRankingResponse = nullptr;
@@ -111,7 +110,6 @@ namespace LinkuraLocal::HookShare {
             homeSimpleWallpaperSettingInfo.clear();
             homeWallpaperLoaded = false;
             homeWallpaperRestoreDisabled = false;
-            homeWallpaperRestoreDisableAfterNextApply = false;
             homeDetailWallpaperRestoreConsumed = false;
             homeSimpleWallpaperRestoreConsumed = false;
         }
@@ -143,37 +141,31 @@ namespace LinkuraLocal::HookShare {
             }
         }
 
-        static void DisableHomeWallpaperRestoreAfterMutation() {
+        static void DisableHomeWallpaperRestore() {
             std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
-            if (!homeDetailWallpaperRestoreConsumed && !homeSimpleWallpaperRestoreConsumed) return;
             homeWallpaperRestoreDisabled = true;
-            homeWallpaperRestoreDisableAfterNextApply = false;
             homeDetailWallpaperSettingInfo.clear();
             homeSimpleWallpaperSettingInfo.clear();
         }
 
-        static void DisableHomeWallpaperRestoreAfterNextCustomSettingApply(const std::string& path) {
+        static void DisableHomeWallpaperRestoreForCustomSettingRequest(const std::string& path) {
             if (path != "/v1/home/get_custom_setting") return;
 
-            std::lock_guard<std::mutex> lock(homeWallpaperRestoreMutex);
-            if (!homeDetailWallpaperRestoreConsumed && !homeSimpleWallpaperRestoreConsumed) return;
-            homeWallpaperRestoreDisableAfterNextApply = true;
+            DisableHomeWallpaperRestore();
             if (Config::dbgMode || Config::enableOfflineApiMock) {
-                Log::Info("[HomeWallpaper] restore will disable after next home custom apply");
+                Log::Info("[HomeWallpaper] restore disabled for home custom setting");
             }
         }
 
-        static void RememberHomeWallpaperRequest(const std::string& path, const std::string& body) {
-            if (path == "/v1/home/set_wallpaper_setting" || path == "/v1/home/set_current_wallpaper_setting") {
-                DisableHomeWallpaperRestoreAfterMutation();
+        static void RememberHomeWallpaperRequest(const std::string& path, const std::string&) {
+            if (
+                path == "/v1/home/set_wallpaper_setting" ||
+                path == "/v1/home/set_current_wallpaper_setting" ||
+                path == "/v1/home/notify_wallpaper_setting"
+            ) {
+                DisableHomeWallpaperRestore();
                 return;
             }
-            if (path != "/v1/home/notify_wallpaper_setting") return;
-
-            auto json = nlohmann::json::parse(body, nullptr, false);
-            if (json.is_discarded() || !json.is_object()) return;
-            StoreHomeWallpaperRestoreCandidate(json);
-            DisableHomeWallpaperRestoreAfterMutation();
         }
 
         static nlohmann::json FetchHomeWallpaperSettingEnvelope(const std::string& authorization) {
@@ -291,14 +283,7 @@ namespace LinkuraLocal::HookShare {
             if (homeWallpaperRestoreDisabled) return {};
             if (!IsHomeDetailWallpaperSettingInfo(homeDetailWallpaperSettingInfo)) return {};
             homeDetailWallpaperRestoreConsumed = true;
-            auto result = homeDetailWallpaperSettingInfo;
-            if (homeWallpaperRestoreDisableAfterNextApply) {
-                homeWallpaperRestoreDisabled = true;
-                homeWallpaperRestoreDisableAfterNextApply = false;
-                homeDetailWallpaperSettingInfo.clear();
-                homeSimpleWallpaperSettingInfo.clear();
-            }
-            return result;
+            return homeDetailWallpaperSettingInfo;
         }
 
         static std::string GetHomeSimpleWallpaperRestoreCandidate() {
@@ -307,14 +292,7 @@ namespace LinkuraLocal::HookShare {
             if (homeWallpaperRestoreDisabled) return {};
             if (!IsHomeSimpleWallpaperSettingInfo(homeSimpleWallpaperSettingInfo)) return {};
             homeSimpleWallpaperRestoreConsumed = true;
-            auto result = homeSimpleWallpaperSettingInfo;
-            if (homeWallpaperRestoreDisableAfterNextApply) {
-                homeWallpaperRestoreDisabled = true;
-                homeWallpaperRestoreDisableAfterNextApply = false;
-                homeDetailWallpaperSettingInfo.clear();
-                homeSimpleWallpaperSettingInfo.clear();
-            }
-            return result;
+            return homeSimpleWallpaperSettingInfo;
         }
 
         static std::string ConvertHomeDetailWallpaperDataToString(void* customData) {
@@ -1979,7 +1957,7 @@ namespace LinkuraLocal::HookShare {
         Log::VerboseFmt("[ApiClient_CallApiAsync] path: %s\nrequest: %s", strPath.c_str(), strBody.c_str());
         RememberHomeWallpaperAuthorization(headerParams);
         RememberHomeWallpaperRequest(strPath, strBody);
-        DisableHomeWallpaperRestoreAfterNextCustomSettingApply(strPath);
+        DisableHomeWallpaperRestoreForCustomSettingRequest(strPath);
         PrimeHomeWallpaperRestoreForHomeRequest(strPath);
 
         if (Config::enableOfflineApiMock && path) {
