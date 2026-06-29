@@ -66,11 +66,11 @@ object OfficialUserDataDumpExporter {
         val zipFile = File(outputDir, "official_user_data_dump_$timestamp.zip")
 
         val apiDumpText = buildString {
-            appendFileIfExists(existingApiDump)
+            appendRedactedJsonlFileIfExists(existingApiDump)
             directApiEvents.forEach { append(it).append('\n') }
         }
         val auditText = buildString {
-            appendFileIfExists(existingAudit)
+            appendRedactedJsonlFileIfExists(existingAudit)
             directAuditEvents.forEach { append(it).append('\n') }
         }
         val successCount = coverageEntries.count { it.optString("status") == "dumped" }
@@ -243,10 +243,45 @@ object OfficialUserDataDumpExporter {
         closeEntry()
     }
 
-    private fun StringBuilder.appendFileIfExists(file: File) {
+    private fun StringBuilder.appendRedactedJsonlFileIfExists(file: File) {
         if (file.exists()) {
-            append(file.readText(Charsets.UTF_8))
-            if (isNotEmpty() && last() != '\n') append('\n')
+            file.forEachLine(Charsets.UTF_8) { line ->
+                if (line.isBlank()) return@forEachLine
+                append(redactSensitiveEventLine(line)).append('\n')
+            }
+        }
+    }
+
+    private fun redactSensitiveEventLine(line: String): String {
+        val event = runCatching { JSONObject(line) }.getOrNull() ?: return line
+        redactSensitiveJson(event)
+        val restResponse = event.optJSONObject("rest_response")
+        val content = restResponse?.optString("content").orEmpty()
+        if (content.isNotBlank()) {
+            val contentJson = runCatching { JSONObject(content) }.getOrNull()
+            if (contentJson != null) {
+                redactSensitiveJson(contentJson)
+                restResponse?.put("content", contentJson.toString())
+            }
+        }
+        return event.toString()
+    }
+
+    private fun redactSensitiveJson(value: Any) {
+        when (value) {
+            is JSONObject -> {
+                sensitiveKeys.forEach { value.remove(it) }
+                value.keys().asSequence().toList().forEach { key ->
+                    val child = value.opt(key)
+                    if (child != null) redactSensitiveJson(child)
+                }
+            }
+            is JSONArray -> {
+                for (index in 0 until value.length()) {
+                    val child = value.opt(index)
+                    if (child != null) redactSensitiveJson(child)
+                }
+            }
         }
     }
 
@@ -263,6 +298,8 @@ object OfficialUserDataDumpExporter {
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
     }
+
+    private val sensitiveKeys = setOf("session_token", "id_token", "authorization")
 }
 
 private data class OfficialApiAuthContext(
