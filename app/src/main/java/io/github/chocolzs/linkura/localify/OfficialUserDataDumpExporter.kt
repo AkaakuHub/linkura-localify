@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -34,7 +35,6 @@ object OfficialUserDataDumpExporter {
     private const val dumpFormatVersion = 2
     private const val apiBaseUrl = "https://api.link-like-lovelive.app/v1"
     private const val apiKey = "4e769efa67d8f54be0b67e8f70ccb23d513a3c841191b6b2ba45ffc6fb498068"
-    private const val rhythmGameGrandPrixId = 706101
 
     fun collectAndExport(
         context: Context,
@@ -68,7 +68,7 @@ object OfficialUserDataDumpExporter {
             directAuditEvents += JSONObject()
                 .put("kind", "official_user_dump_direct_request")
                 .put("target", "/v1${target.path}")
-                .put("detail", JSONObject().put("request", requestBody))
+                .put("detail", createRequestDetail(target, requestBody))
                 .put("current_client_version", authContext.clientVersion)
                 .put("current_res_version", authContext.resVersion)
                 .put("captured_at_ms", startedAtMs)
@@ -80,6 +80,7 @@ object OfficialUserDataDumpExporter {
                 .put("category", target.category)
                 .put("source_endpoint", "/v1${target.path}")
                 .put("request", target.requestBody)
+                .put("query_parameters", target.queryParameters)
                 .put("status", if (result.isSuccess) "dumped" else "missing")
                 .put("status_code", result.statusCode)
                 .put("reason", result.reason)
@@ -111,6 +112,12 @@ object OfficialUserDataDumpExporter {
             }
             if (target.path == "/select_ticket_exchange/get_list" && result.isSuccess) {
                 val dependentTargets = extractSelectTicketExchangeCardTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
+            if (target.path == "/rhythm_game/home" && result.isSuccess) {
+                val dependentTargets = extractRhythmGameGrandPrixTargets(result.event)
                 totalCount += dependentTargets.size
                 reportProgress()
                 collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
@@ -191,7 +198,6 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_recovery_challenge_count", JSONObject()),
             CollectionTarget("userLives", "/out_quest_live/music_learning/get_music_select", JSONObject()),
             CollectionTarget("userRhythmGame", "/rhythm_game/home", JSONObject()),
-            CollectionTarget("userRhythmGameGrandPrix", "/rhythm_game_grand_prix/top", JSONObject().put("grand_prix_id", rhythmGameGrandPrixId)),
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
         )
     }
@@ -236,7 +242,7 @@ object OfficialUserDataDumpExporter {
         directAuditEvents += JSONObject()
             .put("kind", "official_user_dump_direct_request")
             .put("target", "/v1${target.path}")
-            .put("detail", JSONObject().put("request", requestBody))
+            .put("detail", createRequestDetail(target, requestBody))
             .put("current_client_version", authContext.clientVersion)
             .put("current_res_version", authContext.resVersion)
             .put("captured_at_ms", startedAtMs)
@@ -247,6 +253,7 @@ object OfficialUserDataDumpExporter {
             .put("category", target.category)
             .put("source_endpoint", "/v1${target.path}")
             .put("request", target.requestBody)
+            .put("query_parameters", target.queryParameters)
             .put("status", if (result.isSuccess) "dumped" else "missing")
             .put("status_code", result.statusCode)
             .put("reason", result.reason)
@@ -280,7 +287,16 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("circle", "/circle/get_detail", searchRequest),
             CollectionTarget("circle", "/circle/get_info", searchRequest),
             CollectionTarget("userCircleNotifications", "/circle/get_invite_and_join_info", searchRequest),
-            CollectionTarget("circleChatLogs", "/circle/get_chat_log_list", JSONObject(), "GET"),
+            CollectionTarget(
+                "circleChatLogs",
+                "/circle/get_chat_log_list",
+                JSONObject(),
+                "GET",
+                JSONObject()
+                    .put("diff_order_id", 0)
+                    .put("is_item_request", true)
+                    .put("already_read_order_id", 0)
+            ),
         )
     }
 
@@ -355,6 +371,19 @@ object OfficialUserDataDumpExporter {
         }
     }
 
+    private fun extractRhythmGameGrandPrixTargets(rhythmGameHomeEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(rhythmGameHomeEvent) ?: return emptyList()
+        val grandPrixId = response.optInt("grand_prix_id", 0)
+        if (grandPrixId <= 0) return emptyList()
+        return listOf(
+            CollectionTarget(
+                "userRhythmGameGrandPrix",
+                "/rhythm_game_grand_prix/top",
+                JSONObject().put("grand_prix_id", grandPrixId)
+            )
+        )
+    }
+
     private fun extractResponse(event: JSONObject): JSONObject? {
         return event.optJSONObject("response")
             ?: event.optJSONObject("rest_response")?.optString("content")?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -405,10 +434,11 @@ object OfficialUserDataDumpExporter {
             .put("current_client_version", authContext.clientVersion)
             .put("current_res_version", authContext.resVersion)
             .put("api_source", "official_direct")
+            .put("query_parameters", target.queryParameters)
             .put("captured_at_ms", capturedAtMs)
 
         return try {
-            val connection = (URL("$apiBaseUrl$path").openConnection() as HttpURLConnection).apply {
+            val connection = (URL(buildOfficialApiUrl(path, target.queryParameters)).openConnection() as HttpURLConnection).apply {
                 requestMethod = target.method
                 connectTimeout = 15000
                 readTimeout = 20000
@@ -446,6 +476,24 @@ object OfficialUserDataDumpExporter {
             event.put("error", e.toString())
             DirectApiResult(false, 0, e.toString(), capturedAtMs, event)
         }
+    }
+
+    private fun createRequestDetail(target: CollectionTarget, requestBody: String): JSONObject {
+        return JSONObject()
+            .put("request", requestBody)
+            .put("query_parameters", target.queryParameters)
+    }
+
+    private fun buildOfficialApiUrl(path: String, queryParameters: JSONObject): String {
+        val query = queryParameters.keys().asSequence().joinToString("&") { key ->
+            "${urlEncode(key)}=${urlEncode(queryParameters.opt(key).toString())}"
+        }
+        if (query.isBlank()) return "$apiBaseUrl$path"
+        return "$apiBaseUrl$path?$query"
+    }
+
+    private fun urlEncode(value: String): String {
+        return URLEncoder.encode(value, "UTF-8")
     }
 
     private fun createManifest(authContext: OfficialApiAuthContext, fileName: String): JSONObject {
@@ -565,6 +613,7 @@ private data class CollectionTarget(
     val path: String,
     val requestBody: JSONObject,
     val method: String = "POST",
+    val queryParameters: JSONObject = JSONObject(),
 )
 
 private data class DirectApiResult(
