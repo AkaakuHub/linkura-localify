@@ -122,6 +122,12 @@ object OfficialUserDataDumpExporter {
                 reportProgress()
                 collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
+            if (target.path == "/archive/get_home" && result.isSuccess) {
+                val dependentTargets = extractArchiveHomeDependentTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
         }
 
         val outputDir = File(filesDir, "official_user_data_dumps").apply { mkdirs() }
@@ -158,6 +164,7 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("registeredUsers", "/profile/get_info", JSONObject().put("player_id", playerId)),
             CollectionTarget("userHeaders", "/home/get_home", JSONObject()),
             CollectionTarget("userInventories", "/user/items/get_list", JSONObject()),
+            CollectionTarget("userInventories", "/user/items/get_list", JSONObject(), "GET"),
             CollectionTarget("userCards", "/user/card/get_list", JSONObject().put("search_conditions", "{}")),
             CollectionTarget("userDecks", "/user/deck/get_list", JSONObject()),
             CollectionTarget("userProfileSettings", "/home/get_custom_setting", JSONObject()),
@@ -177,6 +184,17 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userPresentBoxes", "/present_box/get_list", JSONObject().put("page", 1)),
             CollectionTarget("userPresentBoxes", "/present_box/get_history", JSONObject().put("page", 1)),
             CollectionTarget("userArchiveCollections", "/archive/get_home", JSONObject()),
+            CollectionTarget(
+                "userArchiveCollections",
+                "/archive/get_archive_list",
+                JSONObject()
+                    .put("order", "desc")
+                    .put("characters", JSONArray())
+                    .put("limit", 100)
+                    .put("offset", 0)
+                    .put("sort", "live_start_time")
+            ),
+            CollectionTarget("userArchiveWithliveDetails", "/archive/withlive_info", JSONObject(), "GET"),
             CollectionTarget("userActivityRecords", "/activity_record/get_top", JSONObject()),
             CollectionTarget("userCollections", "/collection/get_gallary_list", JSONObject()),
             CollectionTarget("userCollections", "/collection/get_music_list", JSONObject()),
@@ -382,6 +400,44 @@ object OfficialUserDataDumpExporter {
                 JSONObject().put("grand_prix_id", grandPrixId)
             )
         )
+    }
+
+    private fun extractArchiveHomeDependentTargets(archiveHomeEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(archiveHomeEvent) ?: return emptyList()
+        val targets = mutableListOf<CollectionTarget>()
+        for (archiveId in collectArchiveIds(response.optJSONArray("live_archive_list"))) {
+            targets += CollectionTarget(
+                "userArchiveWithliveDetails",
+                "/archive/get_with_archive_data",
+                JSONObject().put("archives_id", archiveId)
+            )
+            targets += CollectionTarget(
+                "userArchiveFesDetails",
+                "/archive/get_fes_archive_data",
+                JSONObject().put("archives_id", archiveId)
+            )
+        }
+        for (liveId in collectArchiveIds(response.optJSONArray("with_station_list"))) {
+            targets += CollectionTarget(
+                "userArchiveWithstationDetails",
+                "/archive/get_with_station_data",
+                JSONObject().put("live_id", liveId)
+            )
+        }
+        return targets
+    }
+
+    private fun collectArchiveIds(list: JSONArray?): List<String> {
+        if (list == null) return emptyList()
+        val ids = mutableListOf<String>()
+        for (index in 0 until list.length()) {
+            val archive = list.optJSONObject(index) ?: continue
+            val id = archive.optString("archives_id")
+                .ifBlank { archive.optString("archive_id") }
+                .ifBlank { archive.optString("live_id") }
+            if (id.isNotBlank()) ids += id
+        }
+        return ids.distinct()
     }
 
     private fun extractResponse(event: JSONObject): JSONObject? {
