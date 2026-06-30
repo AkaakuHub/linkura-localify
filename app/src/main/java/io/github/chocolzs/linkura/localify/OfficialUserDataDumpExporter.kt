@@ -90,12 +90,10 @@ object OfficialUserDataDumpExporter {
                 collectUserCardDetails(authContext, cardIds, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
             if (target.path == "/circle/get_circle_top_info" && result.isSuccess) {
-                val searchGuildKey = extractCircleSearchGuildKey(result.event)
-                if (searchGuildKey != null) {
-                    totalCount += 1
-                    reportProgress()
-                    collectCircleInviteAndJoinInfo(authContext, searchGuildKey, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
-                }
+                val dependentTargets = extractCircleDependentTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
             if (target.path == "/out_quest_live/get_quest_top" && result.isSuccess) {
                 val dependentTargets = extractQuestTopDependentTargets(result.event)
@@ -154,6 +152,7 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userCards", "/user/card/get_list", JSONObject().put("search_conditions", "{}")),
             CollectionTarget("userDecks", "/user/deck/get_list", JSONObject()),
             CollectionTarget("userProfileSettings", "/home/get_custom_setting", JSONObject()),
+            CollectionTarget("userProfileSettings", "/home/get_wallpaper_setting", JSONObject()),
             CollectionTarget("userProfileDesigns", "/profile/get_my_design_card_list", JSONObject()),
             CollectionTarget("userProfileDesigns", "/profile/get_my_design_icon_list", JSONObject()),
             CollectionTarget("userProfileSettings", "/profile/get_mute_list", JSONObject()),
@@ -162,6 +161,7 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userFriendCards", "/follow/get_follower_list", JSONObject().put("order_type", 1).put("desc_order", true).put("limit", 100).put("offset", 0)),
             CollectionTarget("userSocials", "/follow/live_chat_group_list", JSONObject()),
             CollectionTarget("circle", "/circle/get_circle_top_info", JSONObject()),
+            CollectionTarget("userCircleNotifications", "/circle/get_invite_list", JSONObject()),
             CollectionTarget("userGachas", "/gacha/get_series_list", JSONObject()),
             CollectionTarget("userGachas", "/gacha/get_history", JSONObject()),
             CollectionTarget("userGachas", "/select_ticket_exchange/get_list", JSONObject()),
@@ -193,22 +193,6 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
             CollectionTarget("userChapters", "/chapter/get_point_rewards", JSONObject()),
         )
-    }
-
-    private fun collectCircleInviteAndJoinInfo(
-        authContext: OfficialApiAuthContext,
-        searchGuildKey: String,
-        directApiEvents: MutableList<String>,
-        directAuditEvents: MutableList<String>,
-        coverageEntries: MutableList<JSONObject>,
-        onTargetCompleted: () -> Unit,
-    ) {
-        val target = CollectionTarget(
-            "userCircleNotifications",
-            "/circle/get_invite_and_join_info",
-            JSONObject().put("search_guild_key", searchGuildKey)
-        )
-        collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries, onTargetCompleted)
     }
 
     private fun collectUserCardDetails(
@@ -286,6 +270,17 @@ object OfficialUserDataDumpExporter {
             if (cardId.isNotBlank()) cardIds += cardId
         }
         return cardIds.distinct()
+    }
+
+    private fun extractCircleDependentTargets(circleTopInfoEvent: JSONObject): List<CollectionTarget> {
+        val searchGuildKey = extractCircleSearchGuildKey(circleTopInfoEvent) ?: return emptyList()
+        val searchRequest = JSONObject().put("search_guild_key", searchGuildKey)
+        return listOf(
+            CollectionTarget("circle", "/circle/get_detail", searchRequest),
+            CollectionTarget("circle", "/circle/get_info", searchRequest),
+            CollectionTarget("userCircleNotifications", "/circle/get_invite_and_join_info", searchRequest),
+            CollectionTarget("circleChatLogs", "/circle/get_chat_log_list", JSONObject()),
+        )
     }
 
     private fun extractQuestTopDependentTargets(questTopEvent: JSONObject): List<CollectionTarget> {
