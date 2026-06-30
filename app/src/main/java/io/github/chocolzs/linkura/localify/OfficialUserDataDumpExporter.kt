@@ -74,7 +74,10 @@ object OfficialUserDataDumpExporter {
                 .put("captured_at_ms", startedAtMs)
                 .toString()
 
-            val result = postOfficialApi(authContext, target, requestBody)
+            val result = validateDirectApiResult(
+                target,
+                postOfficialApi(authContext, target, requestBody)
+            )
             directApiEvents += result.event.toString()
             coverageEntries += JSONObject()
                 .put("category", target.category)
@@ -116,6 +119,12 @@ object OfficialUserDataDumpExporter {
                 reportProgress()
                 collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
+            if (target.path == "/present_box/get_list" && result.isSuccess) {
+                val dependentTargets = extractArchivePrizeTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
             if (target.path == "/rhythm_game/home" && result.isSuccess) {
                 val dependentTargets = extractRhythmGameGrandPrixTargets(result.event)
                 totalCount += dependentTargets.size
@@ -124,6 +133,12 @@ object OfficialUserDataDumpExporter {
             }
             if (target.path == "/archive/get_home" && result.isSuccess) {
                 val dependentTargets = extractArchiveHomeDependentTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
+            if (target.path == "/archive/get_archive_list" && result.isSuccess) {
+                val dependentTargets = extractArchiveListDependentTargets(result.event)
                 totalCount += dependentTargets.size
                 reportProgress()
                 collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
@@ -163,8 +178,11 @@ object OfficialUserDataDumpExporter {
         return listOf(
             CollectionTarget("registeredUsers", "/profile/get_info", JSONObject().put("player_id", playerId)),
             CollectionTarget("userHeaders", "/home/get_home", JSONObject()),
-            CollectionTarget("userInventories", "/user/items/get_list", JSONObject()),
-            CollectionTarget("userInventories", "/user/items/get_list", JSONObject(), "GET"),
+            CollectionTarget(
+                "userInventories",
+                "/user/items/get_list",
+                JSONObject().put("item_category", JSONArray(listOf(0, 1, 2, 3)))
+            ),
             CollectionTarget("userCards", "/user/card/get_list", JSONObject().put("search_conditions", "{}")),
             CollectionTarget("userDecks", "/user/deck/get_list", JSONObject()),
             CollectionTarget("userProfileSettings", "/home/get_custom_setting", JSONObject()),
@@ -265,7 +283,10 @@ object OfficialUserDataDumpExporter {
             .put("current_res_version", authContext.resVersion)
             .put("captured_at_ms", startedAtMs)
             .toString()
-        val result = postOfficialApi(authContext, target, requestBody)
+        val result = validateDirectApiResult(
+            target,
+            postOfficialApi(authContext, target, requestBody)
+        )
         directApiEvents += result.event.toString()
         coverageEntries += JSONObject()
             .put("category", target.category)
@@ -389,6 +410,16 @@ object OfficialUserDataDumpExporter {
         }
     }
 
+    private fun extractArchivePrizeTargets(presentBoxEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(presentBoxEvent) ?: return emptyList()
+        val items = response.optJSONArray("items") ?: return emptyList()
+        val hasArchivePrize = (0 until items.length()).any { index ->
+            items.optJSONObject(index)?.optInt("item_id") == 2016001
+        }
+        if (!hasArchivePrize) return emptyList()
+        return listOf(CollectionTarget("archiveGiftPoints", "/archive/withlive_prize", JSONObject()))
+    }
+
     private fun extractRhythmGameGrandPrixTargets(rhythmGameHomeEvent: JSONObject): List<CollectionTarget> {
         val response = extractResponse(rhythmGameHomeEvent) ?: return emptyList()
         val grandPrixId = response.optInt("grand_prix_id", 0)
@@ -423,6 +454,35 @@ object OfficialUserDataDumpExporter {
                 "/archive/get_with_station_data",
                 JSONObject().put("live_id", liveId)
             )
+        }
+        return targets
+    }
+
+    private fun extractArchiveListDependentTargets(archiveListEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(archiveListEvent) ?: return emptyList()
+        val archives = response.optJSONArray("archive_list") ?: return emptyList()
+        val targets = mutableListOf<CollectionTarget>()
+        for (index in 0 until archives.length()) {
+            val archive = archives.optJSONObject(index) ?: continue
+            val archiveId = archive.optString("archives_id").ifBlank { archive.optString("live_id") }
+            if (archiveId.isBlank()) continue
+            when (archive.optInt("live_type", 0)) {
+                1 -> targets += CollectionTarget(
+                    "userArchiveFesDetails",
+                    "/archive/get_fes_archive_data",
+                    JSONObject().put("archives_id", archiveId)
+                )
+                2 -> targets += CollectionTarget(
+                    "userArchiveWithliveDetails",
+                    "/archive/get_with_archive_data",
+                    JSONObject().put("archives_id", archiveId)
+                )
+                3 -> targets += CollectionTarget(
+                    "userArchiveWithstationDetails",
+                    "/archive/get_with_station_data",
+                    JSONObject().put("live_id", archiveId)
+                )
+            }
         }
         return targets
     }
@@ -532,6 +592,42 @@ object OfficialUserDataDumpExporter {
             event.put("error", e.toString())
             DirectApiResult(false, 0, e.toString(), capturedAtMs, event)
         }
+    }
+
+    private fun validateDirectApiResult(
+        target: CollectionTarget,
+        result: DirectApiResult,
+    ): DirectApiResult {
+        if (!result.isSuccess || target.path != "/user/items/get_list") {
+            return result
+        }
+        val responseContent = result.event
+            .optJSONObject("rest_response")
+            ?.optString("content")
+            .orEmpty()
+        val response = runCatching { JSONObject(responseContent) }.getOrNull()
+            ?: return result.copy(
+                isSuccess = false,
+                reason = "user/items/get_list response is not JSON"
+            )
+        val categories = response.optJSONArray("item_category_list")
+            ?: return result.copy(
+                isSuccess = false,
+                reason = "user/items/get_list response has no item_category_list"
+            )
+        val itemCount = (0 until categories.length()).sumOf { categoryIndex ->
+            categories.optJSONObject(categoryIndex)
+                ?.optJSONArray("user_item_list")
+                ?.length()
+                ?: 0
+        }
+        if (itemCount == 0) {
+            return result.copy(
+                isSuccess = false,
+                reason = "user/items/get_list response has empty user_item_list"
+            )
+        }
+        return result
     }
 
     private fun createRequestDetail(target: CollectionTarget, requestBody: String): JSONObject {
