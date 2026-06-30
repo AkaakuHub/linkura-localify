@@ -62,6 +62,9 @@ object OfficialUserDataDumpExporter {
             if (target.path == "/user/card/get_list" && result.isSuccess) {
                 collectUserCardDetails(authContext, result.event, directApiEvents, directAuditEvents, coverageEntries)
             }
+            if (target.path == "/circle/get_circle_top_info" && result.isSuccess) {
+                collectCircleInviteAndJoinInfo(authContext, result.event, directApiEvents, directAuditEvents, coverageEntries)
+            }
         }
 
         val outputDir = File(filesDir, "official_user_data_dumps").apply { mkdirs() }
@@ -103,9 +106,7 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("followRelations", "/follow/get_list", JSONObject()),
             CollectionTarget("userFriendCards", "/follow/get_follower_list", JSONObject().put("order_type", 1).put("desc_order", true).put("limit", 100).put("offset", 0)),
             CollectionTarget("circle", "/circle/get_circle_top_info", JSONObject()),
-            CollectionTarget("userCircleNotifications", "/circle/get_invite_and_join_info", JSONObject()),
             CollectionTarget("userGachas", "/gacha/get_series_list", JSONObject()),
-            CollectionTarget("userGachas", "/gacha/get_guarantee_point_list", JSONObject()),
             CollectionTarget("userPresentBoxes", "/present_box/get_list", JSONObject().put("page", 1)),
             CollectionTarget("userArchiveCollections", "/archive/get_home", JSONObject()),
             CollectionTarget("userMissions", "/mission/get_list", JSONObject()),
@@ -115,6 +116,22 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_stage_select", JSONObject()),
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
         )
+    }
+
+    private fun collectCircleInviteAndJoinInfo(
+        authContext: OfficialApiAuthContext,
+        circleTopInfoEvent: JSONObject,
+        directApiEvents: MutableList<String>,
+        directAuditEvents: MutableList<String>,
+        coverageEntries: MutableList<JSONObject>,
+    ) {
+        val searchGuildKey = extractCircleSearchGuildKey(circleTopInfoEvent) ?: return
+        val target = CollectionTarget(
+            "userCircleNotifications",
+            "/circle/get_invite_and_join_info",
+            JSONObject().put("search_guild_key", searchGuildKey)
+        )
+        collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries)
     }
 
     private fun collectUserCardDetails(
@@ -127,32 +144,48 @@ object OfficialUserDataDumpExporter {
         val cardIds = extractUserCardIds(cardListEvent)
         for (dCardDatasId in cardIds) {
             val target = CollectionTarget("userCardDetails", "/user/card/get_detail", JSONObject().put("d_card_datas_id", dCardDatasId))
-            val requestBody = target.requestBody.toString()
-            val startedAtMs = System.currentTimeMillis()
-            directAuditEvents += JSONObject()
-                .put("kind", "official_user_dump_direct_request")
-                .put("target", "/v1${target.path}")
-                .put("detail", JSONObject().put("request", requestBody))
-                .put("current_client_version", authContext.clientVersion)
-                .put("current_res_version", authContext.resVersion)
-                .put("captured_at_ms", startedAtMs)
-                .toString()
-            val result = postOfficialApi(authContext, target.path, requestBody)
-            directApiEvents += result.event.toString()
-            coverageEntries += JSONObject()
-                .put("category", target.category)
-                .put("source_endpoint", "/v1${target.path}")
-                .put("request", target.requestBody)
-                .put("status", if (result.isSuccess) "dumped" else "missing")
-                .put("status_code", result.statusCode)
-                .put("reason", result.reason)
-                .put("captured_at_ms", result.capturedAtMs)
+            collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries)
         }
     }
 
+    private fun collectDependentTarget(
+        authContext: OfficialApiAuthContext,
+        target: CollectionTarget,
+        directApiEvents: MutableList<String>,
+        directAuditEvents: MutableList<String>,
+        coverageEntries: MutableList<JSONObject>,
+    ) {
+        val requestBody = target.requestBody.toString()
+        val startedAtMs = System.currentTimeMillis()
+        directAuditEvents += JSONObject()
+            .put("kind", "official_user_dump_direct_request")
+            .put("target", "/v1${target.path}")
+            .put("detail", JSONObject().put("request", requestBody))
+            .put("current_client_version", authContext.clientVersion)
+            .put("current_res_version", authContext.resVersion)
+            .put("captured_at_ms", startedAtMs)
+            .toString()
+        val result = postOfficialApi(authContext, target.path, requestBody)
+        directApiEvents += result.event.toString()
+        coverageEntries += JSONObject()
+            .put("category", target.category)
+            .put("source_endpoint", "/v1${target.path}")
+            .put("request", target.requestBody)
+            .put("status", if (result.isSuccess) "dumped" else "missing")
+            .put("status_code", result.statusCode)
+            .put("reason", result.reason)
+            .put("captured_at_ms", result.capturedAtMs)
+    }
+
+    private fun extractCircleSearchGuildKey(circleTopInfoEvent: JSONObject): String? {
+        val response = extractResponse(circleTopInfoEvent) ?: return null
+        return response.optJSONObject("circle_info")
+            ?.optString("search_guild_key")
+            ?.takeIf { it.isNotBlank() }
+    }
+
     private fun extractUserCardIds(cardListEvent: JSONObject): List<String> {
-        val response = cardListEvent.optJSONObject("response")
-            ?: cardListEvent.optJSONObject("rest_response")?.optString("content")?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val response = extractResponse(cardListEvent)
             ?: return emptyList()
         val cards = response.optJSONArray("user_card_data_list") ?: return emptyList()
         val cardIds = mutableListOf<String>()
@@ -161,6 +194,11 @@ object OfficialUserDataDumpExporter {
             if (cardId.isNotBlank()) cardIds += cardId
         }
         return cardIds.distinct()
+    }
+
+    private fun extractResponse(event: JSONObject): JSONObject? {
+        return event.optJSONObject("response")
+            ?: event.optJSONObject("rest_response")?.optString("content")?.let { runCatching { JSONObject(it) }.getOrNull() }
     }
 
     private fun readLatestAuthContext(apiDumpFile: File): OfficialApiAuthContext {
