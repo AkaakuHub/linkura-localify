@@ -300,7 +300,7 @@ class OverlayToolbarUI {
             }
             addView(colorPickerButton)
 
-            addView(createMainToolButton(activity, SVGIcon.Refresh::createDrawable, activity.getString(R.string.official_user_dump_button)) {
+            addView(createMainToolButton(activity, SVGIcon.Refresh::createDrawable, XposedModuleStrings.get(R.string.official_user_dump_button)) {
                 startOfficialUserDataDump(activity)
             })
 
@@ -333,11 +333,11 @@ class OverlayToolbarUI {
 
     private fun startOfficialUserDataDump(activity: Activity) {
         if (isOfficialDumpRunning) {
-            Toast.makeText(activity, activity.getString(R.string.official_user_dump_running), Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, XposedModuleStrings.get(R.string.official_user_dump_running), Toast.LENGTH_SHORT).show()
             return
         }
         isOfficialDumpRunning = true
-        Toast.makeText(activity, activity.getString(R.string.official_user_dump_started), Toast.LENGTH_SHORT).show()
+        Toast.makeText(activity, XposedModuleStrings.get(R.string.official_user_dump_started), Toast.LENGTH_SHORT).show()
 
         Thread {
             var lastProgressBucket = 0
@@ -350,7 +350,7 @@ class OverlayToolbarUI {
                             activity.runOnUiThread {
                                 Toast.makeText(
                                     activity,
-                                    activity.getString(
+                                    XposedModuleStrings.get(
                                         R.string.official_user_dump_progress,
                                         bucket * 10,
                                         progress.completedCount,
@@ -368,7 +368,7 @@ class OverlayToolbarUI {
                 result.onSuccess { dumpResult ->
                     Toast.makeText(
                         activity,
-                        activity.getString(
+                        XposedModuleStrings.get(
                             R.string.official_user_dump_success,
                             dumpResult.zipFile.name,
                             dumpResult.successCount,
@@ -380,7 +380,7 @@ class OverlayToolbarUI {
                     Log.e(TAG, "Failed to save official user data dump", error)
                     Toast.makeText(
                         activity,
-                        activity.getString(
+                        XposedModuleStrings.get(
                             R.string.official_user_dump_failed,
                             error.message ?: error.javaClass.simpleName
                         ),
