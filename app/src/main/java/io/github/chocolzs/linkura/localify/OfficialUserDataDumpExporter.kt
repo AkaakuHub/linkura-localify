@@ -31,8 +31,10 @@ data class OfficialUserDataDumpProgress(
 }
 
 object OfficialUserDataDumpExporter {
+    private const val dumpFormatVersion = 2
     private const val apiBaseUrl = "https://api.link-like-lovelive.app/v1"
     private const val apiKey = "4e769efa67d8f54be0b67e8f70ccb23d513a3c841191b6b2ba45ffc6fb498068"
+    private const val rhythmGameGrandPrixId = 706101
 
     fun collectAndExport(
         context: Context,
@@ -72,7 +74,7 @@ object OfficialUserDataDumpExporter {
                 .put("captured_at_ms", startedAtMs)
                 .toString()
 
-            val result = postOfficialApi(authContext, target.path, requestBody)
+            val result = postOfficialApi(authContext, target, requestBody)
             directApiEvents += result.event.toString()
             coverageEntries += JSONObject()
                 .put("category", target.category)
@@ -189,9 +191,8 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_recovery_challenge_count", JSONObject()),
             CollectionTarget("userLives", "/out_quest_live/music_learning/get_music_select", JSONObject()),
             CollectionTarget("userRhythmGame", "/rhythm_game/home", JSONObject()),
-            CollectionTarget("userRhythmGameGrandPrix", "/rhythm_game_grand_prix/top", JSONObject()),
+            CollectionTarget("userRhythmGameGrandPrix", "/rhythm_game_grand_prix/top", JSONObject().put("grand_prix_id", rhythmGameGrandPrixId)),
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
-            CollectionTarget("userChapters", "/chapter/get_point_rewards", JSONObject()),
         )
     }
 
@@ -240,7 +241,7 @@ object OfficialUserDataDumpExporter {
             .put("current_res_version", authContext.resVersion)
             .put("captured_at_ms", startedAtMs)
             .toString()
-        val result = postOfficialApi(authContext, target.path, requestBody)
+        val result = postOfficialApi(authContext, target, requestBody)
         directApiEvents += result.event.toString()
         coverageEntries += JSONObject()
             .put("category", target.category)
@@ -279,7 +280,7 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("circle", "/circle/get_detail", searchRequest),
             CollectionTarget("circle", "/circle/get_info", searchRequest),
             CollectionTarget("userCircleNotifications", "/circle/get_invite_and_join_info", searchRequest),
-            CollectionTarget("circleChatLogs", "/circle/get_chat_log_list", JSONObject()),
+            CollectionTarget("circleChatLogs", "/circle/get_chat_log_list", JSONObject(), "GET"),
         )
     }
 
@@ -327,9 +328,14 @@ object OfficialUserDataDumpExporter {
             val categoryId = categoryList.optJSONObject(index)?.optInt("category_id", 0) ?: 0
             if (categoryId > 0) categoryIds += categoryId
         }
-        return categoryIds.distinct().map { categoryId ->
+        val chapterId = response.optInt("chapter_id", 0)
+        val targets = categoryIds.distinct().map { categoryId ->
             CollectionTarget("userChapterMissions", "/chapter/category_info", JSONObject().put("category_id", categoryId))
+        }.toMutableList()
+        if (chapterId > 0) {
+            targets += CollectionTarget("userChapters", "/chapter/get_point_rewards", JSONObject().put("chapter_id", chapterId))
         }
+        return targets
     }
 
     private fun extractSelectTicketExchangeCardTargets(selectTicketExchangeEvent: JSONObject): List<CollectionTarget> {
@@ -387,9 +393,10 @@ object OfficialUserDataDumpExporter {
 
     private fun postOfficialApi(
         authContext: OfficialApiAuthContext,
-        path: String,
+        target: CollectionTarget,
         body: String,
     ): DirectApiResult {
+        val path = target.path
         val capturedAtMs = System.currentTimeMillis()
         val event = JSONObject()
             .put("kind", "official_user_dump_direct_response")
@@ -402,10 +409,10 @@ object OfficialUserDataDumpExporter {
 
         return try {
             val connection = (URL("$apiBaseUrl$path").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
+                requestMethod = target.method
                 connectTimeout = 15000
                 readTimeout = 20000
-                doOutput = true
+                doOutput = target.method != "GET"
                 setRequestProperty("content-type", "application/json")
                 setRequestProperty("accept", "application/json")
                 setRequestProperty("x-client-version", authContext.clientVersion)
@@ -417,7 +424,9 @@ object OfficialUserDataDumpExporter {
                 setRequestProperty("authorization", "Bearer ${authContext.sessionToken}")
                 setRequestProperty("user-agent", "inspix-android/${authContext.clientVersion}")
             }
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (target.method != "GET") {
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
             val statusCode = connection.responseCode
             val responseBody = (if (statusCode in 200..399) connection.inputStream else connection.errorStream)
                 ?.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -441,7 +450,8 @@ object OfficialUserDataDumpExporter {
 
     private fun createManifest(authContext: OfficialApiAuthContext, fileName: String): JSONObject {
         return JSONObject()
-            .put("format_version", 1)
+            .put("format_name", "localify_official_user_data_dump")
+            .put("format_version", dumpFormatVersion)
             .put("created_at_ms", System.currentTimeMillis())
             .put("created_at_utc", utcNow())
             .put("file_name", fileName)
@@ -554,6 +564,7 @@ private data class CollectionTarget(
     val category: String,
     val path: String,
     val requestBody: JSONObject,
+    val method: String = "POST",
 )
 
 private data class DirectApiResult(
