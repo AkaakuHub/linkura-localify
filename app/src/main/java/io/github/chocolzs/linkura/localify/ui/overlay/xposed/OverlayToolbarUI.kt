@@ -20,6 +20,7 @@ import android.widget.Toast
 import android.graphics.drawable.GradientDrawable
 import io.github.chocolzs.linkura.localify.LinkuraHookMain
 import io.github.chocolzs.linkura.localify.OfficialUserDataDumpExporter
+import io.github.chocolzs.linkura.localify.R
 import io.github.chocolzs.linkura.localify.TAG
 
 class OverlayToolbarUI {
@@ -299,7 +300,7 @@ class OverlayToolbarUI {
             }
             addView(colorPickerButton)
 
-            addView(createMainToolButton(activity, SVGIcon.Refresh::createDrawable, "Save official user data") {
+            addView(createMainToolButton(activity, SVGIcon.Refresh::createDrawable, activity.getString(R.string.official_user_dump_button)) {
                 startOfficialUserDataDump(activity)
             })
 
@@ -332,29 +333,57 @@ class OverlayToolbarUI {
 
     private fun startOfficialUserDataDump(activity: Activity) {
         if (isOfficialDumpRunning) {
-            Toast.makeText(activity, "公式データを保存中です", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, activity.getString(R.string.official_user_dump_running), Toast.LENGTH_SHORT).show()
             return
         }
         isOfficialDumpRunning = true
-        Toast.makeText(activity, "公式データの保存を開始しました", Toast.LENGTH_SHORT).show()
+        Toast.makeText(activity, activity.getString(R.string.official_user_dump_started), Toast.LENGTH_SHORT).show()
 
         Thread {
+            var lastProgressBucket = 0
             val result = runCatching {
-                OfficialUserDataDumpExporter.collectAndExport(activity.applicationContext)
+                OfficialUserDataDumpExporter.collectAndExport(activity.applicationContext) { progress ->
+                    val progressBucket = progress.percent / 10
+                    if (progressBucket in 1..9 && progressBucket > lastProgressBucket) {
+                        for (bucket in (lastProgressBucket + 1)..progressBucket) {
+                            lastProgressBucket = bucket
+                            activity.runOnUiThread {
+                                Toast.makeText(
+                                    activity,
+                                    activity.getString(
+                                        R.string.official_user_dump_progress,
+                                        bucket * 10,
+                                        progress.completedCount,
+                                        progress.totalCount
+                                    ),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
             }
             activity.runOnUiThread {
                 isOfficialDumpRunning = false
                 result.onSuccess { dumpResult ->
                     Toast.makeText(
                         activity,
-                        "公式データを保存しました: ${dumpResult.zipFile.name} 成功${dumpResult.successCount}件 失敗${dumpResult.failureCount}件",
+                        activity.getString(
+                            R.string.official_user_dump_success,
+                            dumpResult.zipFile.name,
+                            dumpResult.successCount,
+                            dumpResult.failureCount
+                        ),
                         Toast.LENGTH_LONG
                     ).show()
                 }.onFailure { error ->
                     Log.e(TAG, "Failed to save official user data dump", error)
                     Toast.makeText(
                         activity,
-                        "公式データの保存に失敗しました: ${error.message ?: error.javaClass.simpleName}",
+                        activity.getString(
+                            R.string.official_user_dump_failed,
+                            error.message ?: error.javaClass.simpleName
+                        ),
                         Toast.LENGTH_LONG
                     ).show()
                 }

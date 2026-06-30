@@ -313,5 +313,11 @@
     <string name="app_update_available">App Update Available</string>
     <string name="app_update_ignore">Ignore</string>
     <string name="app_update_install">Install</string>
+    <string name="official_user_dump_button">Save official user data</string>
+    <string name="official_user_dump_running">Official user data is already being saved.</string>
+    <string name="official_user_dump_started">Started saving official user data.</string>
+    <string name="official_user_dump_progress">Saving official user data: %1$d%% (%2$d/%3$d)</string>
+    <string name="official_user_dump_success">Saved official user data: %1$s Success %2$d Failed %3$d</string>
+    <string name="official_user_dump_failed">Failed to save official user data: %1$s</string>
 
 </resources>

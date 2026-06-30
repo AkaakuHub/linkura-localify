@@ -562,4 +562,10 @@ Xposed スコープは再パッチなしで動的に変更が可能です。
     <string name="disable_resource_date_limit">リソース由来の日付制限を無効化</string>
     <string name="disable_resource_date_limit_description">リソースmaster由来の日付制限を無視します。リソースファイルやリソースバージョンは書き換えません。</string>
     <string name="local_mode_hint_collapsed">タイトルをタップして展開します。</string>
+    <string name="official_user_dump_button">公式ユーザーデータを保存</string>
+    <string name="official_user_dump_running">公式ユーザーデータを保存中です。</string>
+    <string name="official_user_dump_started">公式ユーザーデータの保存を開始しました。</string>
+    <string name="official_user_dump_progress">公式ユーザーデータを保存中です: %1$d%% (%2$d/%3$d)</string>
+    <string name="official_user_dump_success">公式ユーザーデータを保存しました: %1$s 成功%2$d件 失敗%3$d件</string>
+    <string name="official_user_dump_failed">公式ユーザーデータの保存に失敗しました: %1$s</string>
 </resources>

@@ -22,11 +22,22 @@ data class OfficialUserDataDumpResult(
     val failureCount: Int,
 )
 
+data class OfficialUserDataDumpProgress(
+    val completedCount: Int,
+    val totalCount: Int,
+) {
+    val percent: Int
+        get() = if (totalCount == 0) 0 else (completedCount * 100 / totalCount).coerceIn(0, 100)
+}
+
 object OfficialUserDataDumpExporter {
     private const val apiBaseUrl = "https://api.link-like-lovelive.app/v1"
     private const val apiKey = "4e769efa67d8f54be0b67e8f70ccb23d513a3c841191b6b2ba45ffc6fb498068"
 
-    fun collectAndExport(context: Context): OfficialUserDataDumpResult {
+    fun collectAndExport(
+        context: Context,
+        onProgress: ((OfficialUserDataDumpProgress) -> Unit)? = null,
+    ): OfficialUserDataDumpResult {
         val filesDir = context.filesDir
         val existingApiDump = File(filesDir, "official_api_dump.jsonl")
         val existingAudit = File(filesDir, "official_request_audit.jsonl")
@@ -37,6 +48,18 @@ object OfficialUserDataDumpExporter {
         val coverageEntries = mutableListOf<JSONObject>()
 
         val plan = createCollectionPlan(authContext.playerId)
+        var completedCount = 0
+        var totalCount = plan.size
+
+        fun reportProgress() {
+            onProgress?.invoke(OfficialUserDataDumpProgress(completedCount, totalCount))
+        }
+
+        fun completeTarget() {
+            completedCount += 1
+            reportProgress()
+        }
+
         for (target in plan) {
             val requestBody = target.requestBody.toString()
             val startedAtMs = System.currentTimeMillis()
@@ -59,11 +82,38 @@ object OfficialUserDataDumpExporter {
                 .put("status_code", result.statusCode)
                 .put("reason", result.reason)
                 .put("captured_at_ms", result.capturedAtMs)
+            completeTarget()
             if (target.path == "/user/card/get_list" && result.isSuccess) {
-                collectUserCardDetails(authContext, result.event, directApiEvents, directAuditEvents, coverageEntries)
+                val cardIds = extractUserCardIds(result.event)
+                totalCount += cardIds.size
+                reportProgress()
+                collectUserCardDetails(authContext, cardIds, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
             if (target.path == "/circle/get_circle_top_info" && result.isSuccess) {
-                collectCircleInviteAndJoinInfo(authContext, result.event, directApiEvents, directAuditEvents, coverageEntries)
+                val searchGuildKey = extractCircleSearchGuildKey(result.event)
+                if (searchGuildKey != null) {
+                    totalCount += 1
+                    reportProgress()
+                    collectCircleInviteAndJoinInfo(authContext, searchGuildKey, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+                }
+            }
+            if (target.path == "/out_quest_live/get_quest_top" && result.isSuccess) {
+                val dependentTargets = extractQuestTopDependentTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
+            if (target.path == "/chapter/home" && result.isSuccess) {
+                val dependentTargets = extractChapterCategoryInfoTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
+            }
+            if (target.path == "/select_ticket_exchange/get_list" && result.isSuccess) {
+                val dependentTargets = extractSelectTicketExchangeCardTargets(result.event)
+                totalCount += dependentTargets.size
+                reportProgress()
+                collectDependentTargets(authContext, dependentTargets, directApiEvents, directAuditEvents, coverageEntries, ::completeTarget)
             }
         }
 
@@ -102,49 +152,89 @@ object OfficialUserDataDumpExporter {
             CollectionTarget("userHeaders", "/home/get_home", JSONObject()),
             CollectionTarget("userInventories", "/user/items/get_list", JSONObject()),
             CollectionTarget("userCards", "/user/card/get_list", JSONObject().put("search_conditions", "{}")),
+            CollectionTarget("userDecks", "/user/deck/get_list", JSONObject()),
             CollectionTarget("userProfileSettings", "/home/get_custom_setting", JSONObject()),
+            CollectionTarget("userProfileDesigns", "/profile/get_my_design_card_list", JSONObject()),
+            CollectionTarget("userProfileDesigns", "/profile/get_my_design_icon_list", JSONObject()),
+            CollectionTarget("userProfileSettings", "/profile/get_mute_list", JSONObject()),
+            CollectionTarget("userStatuses", "/profile/get_fan_level_info", JSONObject().put("player_id", playerId)),
             CollectionTarget("followRelations", "/follow/get_list", JSONObject()),
             CollectionTarget("userFriendCards", "/follow/get_follower_list", JSONObject().put("order_type", 1).put("desc_order", true).put("limit", 100).put("offset", 0)),
+            CollectionTarget("userSocials", "/follow/live_chat_group_list", JSONObject()),
             CollectionTarget("circle", "/circle/get_circle_top_info", JSONObject()),
             CollectionTarget("userGachas", "/gacha/get_series_list", JSONObject()),
+            CollectionTarget("userGachas", "/gacha/get_history", JSONObject()),
+            CollectionTarget("userGachas", "/select_ticket_exchange/get_list", JSONObject()),
             CollectionTarget("userPresentBoxes", "/present_box/get_list", JSONObject().put("page", 1)),
+            CollectionTarget("userPresentBoxes", "/present_box/get_history", JSONObject().put("page", 1)),
             CollectionTarget("userArchiveCollections", "/archive/get_home", JSONObject()),
+            CollectionTarget("userActivityRecords", "/activity_record/get_top", JSONObject()),
+            CollectionTarget("userCollections", "/collection/get_gallary_list", JSONObject()),
+            CollectionTarget("userCollections", "/collection/get_music_list", JSONObject()),
+            CollectionTarget("userCollections", "/collection/get_sticker_list", JSONObject()),
             CollectionTarget("userMissions", "/mission/get_list", JSONObject()),
             CollectionTarget("userBeginnerMissions", "/beginner_mission/get_list", JSONObject()),
             CollectionTarget("userStepUpBeginnerMissions", "/step_up_beginner_mission/get_list", JSONObject()),
+            CollectionTarget("userShops", "/shop/get_list", JSONObject()),
+            CollectionTarget("userShops", "/petal_exchange/get_list", JSONObject()),
+            CollectionTarget("userShops", "/gp_prize_exchange/get_list", JSONObject()),
+            CollectionTarget("userShops", "/item_exchange/get_list_new", JSONObject()),
+            CollectionTarget("userShops", "/item_exchange/get_limit_break_material_convert_list", JSONObject()),
+            CollectionTarget("userShops", "/sticker_exchange/get_list", JSONObject()),
+            CollectionTarget("userShops", "/sisca_store/get_list", JSONObject()),
             CollectionTarget("userLives", "/out_quest_live/get_quest_top", JSONObject()),
+            CollectionTarget("userLives", "/out_quest_live/get_stamina_recovery_info", JSONObject()),
+            CollectionTarget("userLives", "/out_quest_live/grade/get_quest_list", JSONObject()),
             CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_stage_select", JSONObject()),
+            CollectionTarget("userDailyQuestStates", "/out_quest_live/daily/get_recovery_challenge_count", JSONObject()),
+            CollectionTarget("userLives", "/out_quest_live/music_learning/get_music_select", JSONObject()),
+            CollectionTarget("userRhythmGame", "/rhythm_game/home", JSONObject()),
+            CollectionTarget("userRhythmGameGrandPrix", "/rhythm_game_grand_prix/top", JSONObject()),
             CollectionTarget("userChapters", "/chapter/home", JSONObject()),
+            CollectionTarget("userChapters", "/chapter/get_point_rewards", JSONObject()),
         )
     }
 
     private fun collectCircleInviteAndJoinInfo(
         authContext: OfficialApiAuthContext,
-        circleTopInfoEvent: JSONObject,
+        searchGuildKey: String,
         directApiEvents: MutableList<String>,
         directAuditEvents: MutableList<String>,
         coverageEntries: MutableList<JSONObject>,
+        onTargetCompleted: () -> Unit,
     ) {
-        val searchGuildKey = extractCircleSearchGuildKey(circleTopInfoEvent) ?: return
         val target = CollectionTarget(
             "userCircleNotifications",
             "/circle/get_invite_and_join_info",
             JSONObject().put("search_guild_key", searchGuildKey)
         )
-        collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries)
+        collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries, onTargetCompleted)
     }
 
     private fun collectUserCardDetails(
         authContext: OfficialApiAuthContext,
-        cardListEvent: JSONObject,
+        cardIds: List<String>,
         directApiEvents: MutableList<String>,
         directAuditEvents: MutableList<String>,
         coverageEntries: MutableList<JSONObject>,
+        onTargetCompleted: () -> Unit,
     ) {
-        val cardIds = extractUserCardIds(cardListEvent)
         for (dCardDatasId in cardIds) {
             val target = CollectionTarget("userCardDetails", "/user/card/get_detail", JSONObject().put("d_card_datas_id", dCardDatasId))
-            collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries)
+            collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries, onTargetCompleted)
+        }
+    }
+
+    private fun collectDependentTargets(
+        authContext: OfficialApiAuthContext,
+        targets: List<CollectionTarget>,
+        directApiEvents: MutableList<String>,
+        directAuditEvents: MutableList<String>,
+        coverageEntries: MutableList<JSONObject>,
+        onTargetCompleted: () -> Unit,
+    ) {
+        for (target in targets) {
+            collectDependentTarget(authContext, target, directApiEvents, directAuditEvents, coverageEntries, onTargetCompleted)
         }
     }
 
@@ -154,6 +244,7 @@ object OfficialUserDataDumpExporter {
         directApiEvents: MutableList<String>,
         directAuditEvents: MutableList<String>,
         coverageEntries: MutableList<JSONObject>,
+        onTargetCompleted: () -> Unit,
     ) {
         val requestBody = target.requestBody.toString()
         val startedAtMs = System.currentTimeMillis()
@@ -175,6 +266,7 @@ object OfficialUserDataDumpExporter {
             .put("status_code", result.statusCode)
             .put("reason", result.reason)
             .put("captured_at_ms", result.capturedAtMs)
+        onTargetCompleted()
     }
 
     private fun extractCircleSearchGuildKey(circleTopInfoEvent: JSONObject): String? {
@@ -194,6 +286,72 @@ object OfficialUserDataDumpExporter {
             if (cardId.isNotBlank()) cardIds += cardId
         }
         return cardIds.distinct()
+    }
+
+    private fun extractQuestTopDependentTargets(questTopEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(questTopEvent) ?: return emptyList()
+        val targets = mutableListOf<CollectionTarget>()
+        val grandPrixId = response.optInt("grand_prix_id", 0)
+        if (grandPrixId > 0) {
+            val request = JSONObject().put("grand_prix_id", grandPrixId)
+            targets += CollectionTarget("userGrandPrixes", "/out_quest_live/grand_prix/get_top_info", request)
+            targets += CollectionTarget("userGrandPrixes", "/out_quest_live/grand_prix/get_stage_select", request)
+            targets += CollectionTarget("userGrandPrixes", "/out_quest_live/grand_prix/get_history", request)
+        }
+        val gradeChallengeSeasonId = response.optInt("grade_challenge_season_id", 0)
+        if (gradeChallengeSeasonId > 0) {
+            targets += CollectionTarget(
+                "userGradeChallengeProgress",
+                "/out_quest_live/grade_challenge/get_quest_list",
+                JSONObject().put("grade_chal_season_id", gradeChallengeSeasonId)
+            )
+        }
+        val standardAreaList = response.optJSONObject("standard_area_select")?.optJSONArray("area_list")
+        if (standardAreaList != null) {
+            val areaIds = mutableListOf<Int>()
+            for (index in 0 until standardAreaList.length()) {
+                val areaId = standardAreaList.optJSONObject(index)?.optInt("area_id", 0) ?: 0
+                if (areaId > 0) areaIds += areaId
+            }
+            for (areaId in areaIds.distinct()) {
+                targets += CollectionTarget(
+                    "userStandardQuestProgress",
+                    "/out_quest_live/standard/get_stage_select",
+                    JSONObject().put("area_id", areaId)
+                )
+            }
+        }
+        return targets
+    }
+
+    private fun extractChapterCategoryInfoTargets(chapterHomeEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(chapterHomeEvent) ?: return emptyList()
+        val categoryList = response.optJSONArray("category_list") ?: return emptyList()
+        val categoryIds = mutableListOf<Int>()
+        for (index in 0 until categoryList.length()) {
+            val categoryId = categoryList.optJSONObject(index)?.optInt("category_id", 0) ?: 0
+            if (categoryId > 0) categoryIds += categoryId
+        }
+        return categoryIds.distinct().map { categoryId ->
+            CollectionTarget("userChapterMissions", "/chapter/category_info", JSONObject().put("category_id", categoryId))
+        }
+    }
+
+    private fun extractSelectTicketExchangeCardTargets(selectTicketExchangeEvent: JSONObject): List<CollectionTarget> {
+        val response = extractResponse(selectTicketExchangeEvent) ?: return emptyList()
+        val selectTicketExchangeList = response.optJSONArray("select_ticket_exchange_list") ?: return emptyList()
+        val selectTicketSeriesIds = mutableListOf<Int>()
+        for (index in 0 until selectTicketExchangeList.length()) {
+            val seriesId = selectTicketExchangeList.optJSONObject(index)?.optInt("select_ticket_series_id", 0) ?: 0
+            if (seriesId > 0) selectTicketSeriesIds += seriesId
+        }
+        return selectTicketSeriesIds.distinct().map { seriesId ->
+            CollectionTarget(
+                "userGachaExchangeCardHaving",
+                "/gacha/get_exchange_card_having_list",
+                JSONObject().put("exchange_type", 2).put("exchange_id", seriesId)
+            )
+        }
     }
 
     private fun extractResponse(event: JSONObject): JSONObject? {
